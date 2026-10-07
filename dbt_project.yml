@@ -23,6 +23,19 @@ vars:
   # GTFS "as of" date (YYYYMMDD) for the station snapshot. Empty = latest loaded service date.
   gtfs_as_of: ""
 
+  # Loading (all sources are read in place by DuckDB; see models/staging/_sources.yml)
+  use_sample: false            # true = read the committed sample in data/sample/ (offline, CI)
+  lamp_window_days: 90         # full refresh: this many complete service dates, ending yesterday
+  # lamp_start_date / lamp_end_date (YYYY-MM-DD): optional fixed window, e.g.
+  #   --vars '{lamp_start_date: 2026-07-09, lamp_end_date: 2026-10-06}'
+  gtfs_years: [2026]           # GTFS archive years to read; must cover the LAMP window
+  refresh_reference: false     # true = re-read GTFS and Open Data files into their staging tables
+  check_incremental: false     # true = enable the tests in tests/incremental/ (see README)
+  check_build: false           # true = enable tests/assert_build_has_no_failures.sql (see README)
+
+on-run-end:
+  - "{{ write_build_outputs(results) }}"
+
 models:
   mbta_reliability:
     staging:

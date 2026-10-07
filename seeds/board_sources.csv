@@ -1,0 +1,5 @@
+sort_order,name,url,used_for,terms
+1,MBTA LAMP subway on-time performance,https://performancedata.mbta.com/lamp/subway-on-time-performance-v1/index.csv,"Train arrivals, run times and headways (fact table)",MassDOT Developers License Agreement; see data/README.md
+2,MBTA LAMP GTFS archive,https://performancedata.mbta.com/lamp/gtfs_archive/,"Stations, coordinates, routes, colors, stop order",MassDOT Developers License Agreement; see data/README.md
+3,MBTA Gated Station Entries (MBTA Open Data Portal),https://mbta-massdot.opendata.arcgis.com/datasets/001c177f07594e7c99f193dde32284c9,Rider exposure weights,CC0 (as listed on the item)
+4,MBTA Monthly Ridership by Mode and Line (MBTA Open Data Portal),https://mbta-massdot.opendata.arcgis.com/datasets/2048258a18354256a650d41f8fe4532c,"Context (staged, not on the board yet)",CC0 (as listed on the item)

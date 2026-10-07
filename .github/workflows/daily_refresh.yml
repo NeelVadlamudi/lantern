@@ -1,11 +1,13 @@
 name: Daily refresh
 
-# Pulls the newest MBTA service date, rebuilds, and publishes docs/ and out/ to GitHub Pages.
+# Reads the newest MBTA service date, rebuilds, and publishes docs/ and out/ to GitHub Pages.
 # docs/ becomes the site root (board at ./index.html, dbt docs at ./dbt/index.html), out/ is ./out/.
 # Nothing is committed back to the repository: the site is deployed as a Pages artifact.
-# The DuckDB file is carried between runs with actions/cache, so the incremental fact only
-# processes new service dates. On a cache miss the loader falls back to its default window
-# (the last 90 complete service dates) and the station snapshot history is replayed.
+# Only dbt runs here: DuckDB reads the MBTA files in place (httpfs), and the on-run-end hook
+# writes out/board_data.json. The DuckDB file is carried between runs with actions/cache, so
+# the LAMP staging table and the incremental fact only process new service dates. On a cache
+# miss dbt builds the default window (the last 90 complete service dates) and the station
+# snapshot history is replayed.
 
 on:
   schedule:
@@ -36,7 +38,7 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install
+      - name: Install dbt and sqlfluff
         run: pip install -r requirements.txt
 
       - name: Restore warehouse
@@ -44,48 +46,48 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: warehouse/mbta.duckdb
-          key: mbta-duckdb-v1-${{ github.run_id }}
-          restore-keys: mbta-duckdb-v1-
+          key: mbta-duckdb-v2-${{ github.run_id }}
+          restore-keys: mbta-duckdb-v2-
 
       - name: dbt deps
         run: dbt deps --profiles-dir .
 
-      - name: Load raw data
-        id: load
-        run: |
-          if [ -f warehouse/mbta.duckdb ]; then
-            echo "Warehouse restored from cache; pulling new service dates only"
-            python scripts/load_raw.py lamp --since-last
-            echo "fresh=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "No cached warehouse; loading the default window"
-            python scripts/load_raw.py lamp
-            echo "fresh=true" >> "$GITHUB_OUTPUT"
-          fi
-          python scripts/load_raw.py gtfs
-          python scripts/load_raw.py opendata
-
       - name: Source freshness
         run: dbt source freshness --profiles-dir .
 
+      # refresh_reference re-reads the GTFS archive and the Open Data CSVs into their staging
+      # tables once a day; between runs they are kept in the cached warehouse.
       - name: dbt build
-        run: dbt build --profiles-dir .
-
-      - name: Replay station snapshot history (new warehouse only)
-        if: steps.load.outputs.fresh == 'true'
-        run: python scripts/replay_station_snapshot.py
-
-      - name: Export board data and verify
+        id: build
         run: |
-          python scripts/export_board.py
-          python scripts/verify_kpis.py
+          if [ -f warehouse/mbta.duckdb ]; then
+            echo "Warehouse restored from cache; reading new service dates only"
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No cached warehouse; building the default window"
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+          fi
+          dbt build --profiles-dir . --vars '{refresh_reference: true}'
+
+      # New warehouse only: drop the snapshot and replay each GTFS version in date order, so
+      # dbt_valid_from / dbt_valid_to carry the real GTFS dates.
+      - name: Replay station snapshot history
+        if: steps.build.outputs.fresh == 'true'
+        run: |
+          for d in $(dbt --quiet run-operation station_snapshot_replay_dates --args '{reset: true}' --profiles-dir .); do
+            dbt build --profiles-dir . -s int_gtfs_stations_as_of snap_gtfs_stations --vars "{gtfs_as_of: '$d'}"
+          done
+          dbt run --profiles-dir . -s int_gtfs_stations_as_of
+
+      - name: Check the build recorded no failures
+        run: dbt test --profiles-dir . --select assert_build_has_no_failures --vars '{check_build: true}'
 
       - name: Save warehouse
         if: success()
         uses: actions/cache/save@v6
         with:
           path: warehouse/mbta.duckdb
-          key: mbta-duckdb-v1-${{ github.run_id }}
+          key: mbta-duckdb-v2-${{ github.run_id }}
 
       - name: Docs
         run: |

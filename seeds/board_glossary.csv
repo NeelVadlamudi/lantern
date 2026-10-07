@@ -1,0 +1,16 @@
+sort_order,term,meaning
+1,Service date,The MBTA's operating day. Trains running after midnight still count toward the day they started.
+2,Day type,"Weekday, Saturday, Sunday or holiday. Holidays (listed in board_data.json meta.holidays) are their own type because the MBTA runs a weekend schedule on most of them, so weekday figures leave them out."
+3,All days,"Every service date in the window: weekdays, Saturdays, Sundays and holidays. The late-trip, time-over-schedule and long-gap headline numbers are over all days; the gate-entries number is weekdays only."
+4,Scheduled run time,How long the published schedule gives a train to get from one stop to the next.
+5,Excess travel,Actual time between stops minus scheduled time. Positive means slower than the schedule.
+6,Late trip,"A train run whose actual time between its first and last compared stops was more than 5 minutes longer than scheduled. The same 5-minute rule applies on every line, so long lines are more exposed to it."
+7,Excess per trip,"For one train run, the sum of (actual minus scheduled) time over its compared stop-to-stop segments. Averaged per trip, not per stop."
+8,Excess vs schedule,Total excess time divided by total scheduled run time. Compares lines of different length on an equal footing.
+9,Headway,The gap between one train leaving a station and the next train on the same line leaving it.
+10,Long gap,"A wait more than 1.5 times the scheduled gap, e.g. 12+ minutes when trains are due every 8."
+11,Bunched,A train leaving a station less than half the scheduled gap after the train before it.
+12,Headway adherence,Share of gaps between half and 1.5 times the scheduled gap.
+13,Gated entries,"Fare-gate entries at a station, from MBTA's published counts. Each entry is counted once, on one line. One person can make several entries a day, so entries are not riders."
+14,Service period,"MBTA time-of-day bands from its Service Delivery Policy, e.g. AM Peak 7:00-8:59."
+15,Entries during long gaps,"For each station, line and time of day: average gated entries times the share of train departures that came after a long gap, summed. An estimate of how many entries happen during long gaps, not a head count of people who waited."

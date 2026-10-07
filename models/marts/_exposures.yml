@@ -8,7 +8,7 @@ exposures:
     url: ./index.html
     description: >
       Interactive board served from GitHub Pages. It queries the Parquet files in out/ with
-      DuckDB in the browser, reads out/board_data.json for tiles, glossary and build stats, and
+      DuckDB in the browser, reads out/board_data.json (written from board_payload by the on-run-end hook) for tiles, glossary and build stats, and
       overlays live vehicle positions from the MBTA V3 API (outside dbt).
     depends_on:
       - ref('board_line_daily')
@@ -20,5 +20,6 @@ exposures:
       - ref('board_line_shapes')
       - ref('board_service_periods')
       - ref('board_routes')
+      - ref('board_payload')
     owner:
       name: Neel Vadlamudi

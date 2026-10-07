@@ -43,3 +43,23 @@ seeds:
       - name: route_or_line
         data_tests:
           - unique
+  - name: board_glossary
+    description: Plain-language glossary shown on the board (board_data.json glossary).
+    config:
+      column_types:
+        sort_order: integer
+    columns:
+      - name: term
+        data_tests:
+          - unique
+          - not_null
+  - name: board_sources
+    description: Data sources listed on the board (board_data.json meta.sources), with their terms.
+    config:
+      column_types:
+        sort_order: integer
+    columns:
+      - name: name
+        data_tests:
+          - unique
+          - not_null

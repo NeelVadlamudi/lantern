@@ -6,8 +6,10 @@ fare-gate entries to show where it affects the most riders.
 
 Public MBTA data. Live positions from the MBTA V3 API. Not affiliated with the MBTA.
 
-Stack: dbt Core 1.12 + dbt-duckdb, DuckDB as the warehouse, Python for extract/load only.
-Everything is open source; no accounts, keys or paid services are needed.
+Stack: dbt Core 1.12 + dbt-duckdb, with DuckDB as the warehouse. The whole pipeline is dbt:
+DuckDB reads the MBTA files in place over HTTP (httpfs), dbt builds and tests the models,
+writes the Parquet exports and, in an on-run-end hook, `out/board_data.json`. There are no
+scripts outside dbt. Everything is open source; no accounts, keys or paid services are needed.
 
 ## The question
 
@@ -31,13 +33,19 @@ same grain):
   twice. It is an estimate of entries, not a count of people who waited.
 - **Freshness**: latest service date loaded vs. today.
 
+The late-trip, excess and long-gap headline numbers are over **all days** (weekdays, Saturdays,
+Sundays and holidays). Each of those tiles also carries the weekday-only value as a separate
+field (`value_weekday`) for the board's day toggle. The entries-during-long-gaps number is
+weekdays only. Day types come from `dim_dates`; holidays are a seed and are listed in
+`board_data.json` under `meta.holidays`.
+
 Thresholds are dbt vars (`late_trip_seconds`, `long_gap_ratio`, `bunched_ratio`).
 
 ## Lineage
 
 ```mermaid
 flowchart LR
-  subgraph sources[raw: loaded by scripts/load_raw.py]
+  subgraph sources[sources: public files read in place by DuckDB]
     lamp[(LAMP subway on-time)]
     gtfs[(GTFS archive)]
     gse[(Gated station entries)]
@@ -66,6 +74,7 @@ flowchart LR
   end
   snap[[snap_gtfs_stations<br/>SCD2]]
   exports[board_* Parquet in out/]
+  payload[board_tiles / board_line_totals / board_payload<br/>on-run-end: out/board_data.json]
   board{{reliability board}}
   seeds[/seeds: service periods, holidays, branches, display names/]
 
@@ -84,6 +93,7 @@ flowchart LR
   int_st --> snap
   dims --> agg
   agg & geo & dims --> exports --> board
+  agg & geo & dims & exports --> payload --> board
 ```
 
 The full graph, with column docs, is in the dbt docs site (`docs/dbt/index.html`).
@@ -92,10 +102,10 @@ The full graph, with column docs, is in the dbt docs site (`docs/dbt/index.html`
 
 | Layer | Models | Materialization |
 |---|---|---|
-| Staging | 9 views, one per source table: rename, cast, dedupe, parse dates | view |
+| Staging | 9 models, one per source table: rename, cast, dedupe, parse dates. They read the remote files directly (see Loading) | LAMP: incremental; GTFS and Open Data: tables kept between builds (see Loading) |
 | Intermediate | `int_trip_stops__performance` (run times, headways, flags per arrival), `int_service_periods` (minute of day to MBTA service period), `int_line_stop_sequence`, `int_line_shapes`, `int_station_period_riders`, `int_gtfs_stations_as_of` | view, access protected |
 | Marts | `dim_dates`, `dim_routes`, `dim_stations`, `dim_service_periods`, `fct_trip_stop_events`, `fct_trips`, `mart_line_daily_reliability`, `mart_period_reliability`, `mart_station_reliability`, `mart_station_daily_reliability`, `mart_station_overview`, `mart_line_stop_sequence`, `mart_line_shapes`, `mart_data_coverage` | table (fact incremental), access public, contracts enforced |
-| Exports | 9 `board_*` models written to `out/*.parquet` (zstd) for the board | external |
+| Exports | 9 `board_*` models written to `out/*.parquet` (zstd) for the board; `board_tiles`, `board_line_totals` and `board_payload` hold the JSON for `out/board_data.json` | external (Parquet); the three JSON models are tables |
 
 Star schema: `fct_trip_stop_events` (one row per service date, trip, route, vehicle and stop) and
 `fct_trips` (one row per train run) join to `dim_dates`, `dim_routes`, `dim_stations` and
@@ -107,9 +117,37 @@ Midday School, PM Peak, Evening, Late Evening, Night), stored as a seed.
 
 Conventions are in [CONVENTIONS.md](CONVENTIONS.md).
 
+## Loading
+
+There is no separate load step. Each source in `models/staging/_sources.yml` has an
+`external_location`, so `{{ source() }}` renders to a DuckDB read of the public file
+(`read_parquet` / `read_csv` over HTTPS, via the httpfs extension set in `profiles.yml`).
+
+- **LAMP** (`stg_lamp__subway_trip_stops`, incremental on `service_date`): the macro
+  `lamp_files_to_load()` (`macros/lamp_files.sql`) queries the LAMP `index.csv` with
+  `run_query` and builds the list of Parquet URLs to read. On an incremental run that is every
+  date from the latest loaded date minus `incremental_lookback_days` (3, so 4 dates are re-read,
+  because LAMP republishes recent files) up to yesterday in Boston. On a first build or
+  `--full-refresh` it is `lamp_start_date` to `lamp_end_date` if set, otherwise the last
+  `lamp_window_days` (90) complete service dates.
+- **GTFS archive** (one Parquet file per year and GTFS file) and the **Open Data** CSVs
+  (gated entries, monthly ridership) are too large to download on every build (about 80 MB for
+  `stop_times` alone). Their staging models are tables that keep their rows between builds: the
+  remote file is read on the first build, on `--full-refresh`, or with
+  `--vars '{refresh_reference: true}'` (the daily workflow sets it once a day). Otherwise the
+  model inserts nothing and the existing rows stay. GTFS years come from `gtfs_years`
+  (default `[2026]`); `assert_gtfs_covers_lamp_window` fails if the LAMP window needs a year that
+  is not listed.
+- **Sample**: `--vars '{use_sample: true}'` points every source at the small copies committed in
+  `data/sample/` (two real LAMP service dates, 2026-08-27 and 2026-08-28, with a matching
+  `index.csv`, subway-only GTFS subsets and gzipped Open Data CSVs). CI uses it.
+- Any location can be overridden with a var (`lamp_index_url`, `gtfs_archive_url`,
+  `gated_entries_url`, `monthly_ridership_url`), for example to build from a local mirror.
+
 ## Tests and contracts
 
-256 data tests on the full build: 247 pass, 9 warn, 0 fail.
+288 data tests on the full build: 279 pass, 9 warn, 0 fail (plus 3 incremental checks and 1
+post-build check that run only when their var is set, see below).
 
 - Generic: `unique`, `not_null`, `relationships`, `accepted_values`,
   `dbt_utils.unique_combination_of_columns`, `dbt_utils.accepted_range`.
@@ -119,6 +157,19 @@ Conventions are in [CONVENTIONS.md](CONVENTIONS.md).
   every observed station is on the network, adjacent stops are under 6 km apart, service periods
   cover all 1,440 minutes exactly once, every map station has coordinates, board route ids match
   the MBTA V3 API, and more.
+- Board numbers (`tests/kpi/`): each headline tile, its weekday value, and each line's late
+  share and excess per trip are recomputed from `fct_trips` / `fct_trip_stop_events` (not from
+  the marts) and compared to the export models, failing beyond rounding (1e-4 for shares,
+  0.06 s for seconds, 1 entry or 0.1% for the rider tile). Also: coverage counts match the fact,
+  ungated stations have no rider rows, every map branch has its stops in order and a track shape
+  inside Greater Boston, and every Parquet file listed in `board_data.json` has its model's row
+  count.
+- Build result: the on-run-end hook stores every node's result in `audit.build_results`, and
+  writes `out/board_data.json` only if no model or test errored or failed (otherwise the previous
+  file stays). `tests/assert_build_has_no_failures.sql` reads that table; a test cannot see the
+  invocation it runs in, so it runs right after the build:
+  `dbt test --select assert_build_has_no_failures --vars '{check_build: true}'`. The exit code of
+  `dbt build` is the other half of that check.
 - All 14 public marts have enforced contracts (column names and data types checked at build time).
 
 ### Data quality findings (severity warn)
@@ -142,15 +193,26 @@ These come from the source data. They are kept as warnings so they show up in ev
 reprocesses every service date within `incremental_lookback_days` (3) of the latest date already
 in the table, because LAMP republishes recent days, and adds any newer dates.
 
-`scripts/check_incremental.py` checks it: `save` records per-date row counts and load times,
-`compare` (after loading a new day and building) fails unless a newer date was added, dates
-outside the lookback were not rebuilt, and fact rows per date equal staging. CI runs this on
-every push: full refresh on one sample day, then add the second day incrementally.
+The LAMP staging table is incremental the same way (`delete+insert` on `service_date`), so a
+daily build downloads only the lookback dates and the new date.
 
-Run on the full window (copy of the warehouse with 2026-10-06 removed, full refresh, then
-2026-10-06 loaded and built incrementally): 89 dates / 3,591,892 rows before, 90 dates /
-3,641,449 rows after, +49,557 rows for 2026-10-06, 2026-10-02 to 10-05 reprocessed, the other
-85 dates untouched (same row counts and load times).
+To check it, save the per-date state, build a newer date, and run the three tests in
+`tests/incremental/` (a newer date was added, dates older than the lookback kept the same row
+counts and `loaded_at`, and fact rows per date equal staging):
+
+```bash
+dbt build --profiles-dir . --full-refresh --vars '{lamp_end_date: 2026-10-05}'
+dbt run-operation save_incremental_state --profiles-dir .      # writes audit.incremental_state
+dbt build --profiles-dir . --vars '{lamp_end_date: 2026-10-06, check_incremental: true}'
+```
+
+CI runs the same sequence on every push with the two sample dates.
+
+Run on the full window (2026-07-09 to 10-05 with a full refresh, then 2026-10-06 built
+incrementally): 89 dates / 3,591,892 rows before, 90 dates / 3,641,449 rows after, 5 LAMP files
+read by the incremental run (2026-10-02 to 10-05 reprocessed, plus 10-06), the other 85 dates
+untouched (same row counts and load times). The outputs were identical to a full build of the
+90 dates.
 
 Source freshness on LAMP: warn after 2 days, error after 4 days, on the service date.
 `dbt source freshness --profiles-dir .`
@@ -159,8 +221,21 @@ Source freshness on LAMP: warn after 2 days, error after 4 days, on the service 
 
 `snap_gtfs_stations` is a type 2 slowly changing dimension of station attributes (name,
 coordinates, municipality, wheelchair boarding), built from the GTFS archive version active on
-each date. `scripts/replay_station_snapshot.py` replays the archive so history starts at the
-first 2026 GTFS version (2026-01-01) instead of the day the project was first run.
+each date. A normal `dbt build` adds the version active on the latest loaded date. To replay
+history, so it starts at the first 2026 GTFS version (2026-01-01) instead of the day the project
+was first run, rebuild `int_gtfs_stations_as_of` for each as-of date in order and snapshot it.
+`station_snapshot_replay_dates` prints the dates (first loaded date, each date a station's
+attributes changed, last loaded date); with `reset: true` it drops the snapshot first:
+
+```bash
+for d in $(dbt --quiet run-operation station_snapshot_replay_dates --args '{reset: true}' --profiles-dir .); do
+  dbt build --profiles-dir . -s int_gtfs_stations_as_of snap_gtfs_stations --vars "{gtfs_as_of: '$d'}"
+done
+dbt run --profiles-dir . -s int_gtfs_stations_as_of      # back to the latest as-of date
+```
+
+For the current window the dates are 20260709, 20260731, 20260917 and 20261006. The daily
+workflow runs this when it starts from an empty warehouse.
 
 Real changes it picked up in 2026, all on the Green Line C branch:
 
@@ -176,94 +251,107 @@ Real changes it picked up in 2026, all on the Green Line C branch:
 metrics, including `late_trip_share`, `long_gap_share`, `headway_adherence` and
 `excess_travel_minutes`, with `dim_dates` as the time spine. It passes `dbt parse`. MetricFlow itself
 (`dbt-metricflow`) is not installed, so the metrics have not been queried on DuckDB. The same
-numbers are computed in the marts and checked by `scripts/verify_kpis.py`.
+numbers are computed in the marts and checked by the tests in `tests/kpi/`.
 
 ## Exposure and board files
 
 The board is declared as a dbt exposure (`reliability_board`, type application) that depends on
-the nine `board_*` export models. Exports are Parquet files in `out/` that the board queries in
+the nine `board_*` export models and `board_payload`. Exports are Parquet files in `out/` that the board queries in
 the browser with DuckDB-WASM:
 
 | File | Grain | Size |
 |---|---|---|
-| `line_daily.parquet` | route x service date | 38 KB |
+| `line_daily.parquet` | route x service date (with `day_type`) | 39 KB |
 | `line_periods.parquet` | route x day type x service period | 14 KB |
 | `station_periods.parquet` | station x line x day type x service period | 83 KB |
-| `station_daily.parquet` | station x line x service date x service period (additive counts) | 544 KB |
+| `station_daily.parquet` | station x line x service date x service period (additive counts, with `day_type`) | 544 KB |
 | `map_stations.parquet` | station, with coordinates and map values | 10 KB |
 | `line_stops.parquet` | branch x direction x stop order | 9 KB |
 | `line_shapes.parquet` | branch x direction x track point | 40 KB |
 | `routes.parquet` | route | 1 KB |
 | `service_periods.parquet` | service period | 1 KB |
 
-`scripts/export_board.py` writes `out/board_data.json` after the build: headline tiles, the map
-block (stations, ordered stop lists, track shapes, period values), a glossary and build stats read
-from `target/run_results.json` and `target/manifest.json`, and a data coverage block from
-`mart_data_coverage` (see Limits). It runs after dbt because
-`run_results.json` is only complete once the build has finished. `scripts/verify_kpis.py`
-recomputes the tiles from the fact tables and fails on any mismatch, failed test, map station
-without coordinates, non-contiguous stop sequence, or missing branch.
+`out/board_data.json` is built in dbt too. `board_tiles` (one row per headline tile),
+`board_line_totals` (one row per route) and `board_payload` (one row, one JSON column per block:
+meta, tiles, lines, worst stations, worst periods, map with stations, ordered stop lists, track
+shapes and period values, files, data coverage, glossary) are DuckDB tables built with
+`json_object` and lists. Glossary and source text are seeds (`board_glossary`, `board_sources`).
+The on-run-end hook (`macros/write_build_outputs.sql`) adds the `build` block, put together in
+Jinja from the run's `results` (totals by status and by resource type, test counts, warned
+tests) and the project `graph` (models by layer, contracted, incremental and external models,
+lineage edges), and COPYs the row to `out/board_data.json`. It also writes
+`out/build_results.json` (unique_id, resource_type, name, status, execution_time, failures,
+message for every node). Both are written only when `board_payload` was built in that
+invocation and nothing errored or failed, so a partial run such as `dbt build -s board_payload`
+gives a build block that covers only that run.
 
 ## CI and daily refresh
 
-- `.github/workflows/dbt_ci.yml` (push, pull request): installs pinned requirements, runs
-  `sqlfluff lint`, loads the committed sample (two real service dates), builds with
-  `--full-refresh`, adds the second day incrementally and runs `check_incremental.py`, exports,
-  verifies, and generates docs. No network calls to MBTA and no secrets.
+- `.github/workflows/dbt_ci.yml` (push, pull request): installs the pinned requirements (dbt
+  and sqlfluff), runs `sqlfluff lint`, builds the committed sample with `--full-refresh` for the
+  first date, saves the incremental state, builds the second date incrementally with the
+  incremental tests on, runs the post-build check, and generates docs. No calls to MBTA and no
+  secrets.
 - `.github/workflows/daily_refresh.yml` (daily at 11:30 UTC): restores the DuckDB file from
-  `actions/cache`, loads only new LAMP dates (or the default 90-day window on a cache miss), runs
-  source freshness and `dbt build`, exports and verifies, saves the DuckDB file back to the
-  cache, generates docs into `docs/dbt/`, and publishes `docs/` (site root) plus `out/` with
+  `actions/cache`, runs source freshness and `dbt build --vars '{refresh_reference: true}'`
+  (only new LAMP dates on a cache hit, the default 90-day window on a miss, when it also replays
+  the station snapshot), runs the post-build check, saves the DuckDB file back to the cache,
+  generates docs into `docs/dbt/`, and publishes `docs/` (site root) plus `out/` with
   `actions/upload-pages-artifact` and `actions/deploy-pages`. It never commits to the repository.
 
 ## How to run
 
-Requires Python 3.11+.
+Install dbt: `python3 -m venv .venv && . .venv/bin/activate && pip install -r requirements.txt`
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt
 dbt deps --profiles-dir .
 
-# full data: last 90 complete service dates (about 300 MB of downloads)
-python scripts/load_raw.py all
+# full data: last 90 complete service dates, read straight from MBTA (about 300 MB)
 dbt build --profiles-dir .
-python scripts/replay_station_snapshot.py      # optional: station history from 2026-01-01
+
+# or a fixed window
+dbt build --profiles-dir . --full-refresh --vars '{lamp_start_date: 2026-07-09, lamp_end_date: 2026-10-06}'
 
 # or offline, from the committed sample
-python scripts/load_raw.py all --sample
-dbt build --profiles-dir . --full-refresh
+dbt build --profiles-dir . --full-refresh --vars '{use_sample: true}'
 
-# board files and checks
-python scripts/export_board.py
-python scripts/verify_kpis.py
+# daily update: new LAMP dates only; re-read GTFS and Open Data
+dbt build --profiles-dir . --vars '{refresh_reference: true}'
+
+# check the last build had no failures
+dbt test --profiles-dir . --select assert_build_has_no_failures --vars '{check_build: true}'
 
 # docs (single static file, opens from disk)
 dbt docs generate --profiles-dir . --static --target-path target_docs
 mkdir -p docs/dbt && cp target_docs/static_index.html docs/dbt/index.html
 
-# daily update
-python scripts/load_raw.py lamp --since-last && dbt build --profiles-dir .
-
 # lint
 sqlfluff lint models tests
 ```
 
+Every build writes `out/*.parquet`, `out/board_data.json` and `out/build_results.json`.
 Paths can be changed with `MBTA_DUCKDB_PATH` (warehouse file) and `MBTA_OUT_DIR` (export folder).
 
 ## Findings
 
 Window: 90 service dates, 2026-07-09 to 2026-10-06. 3,641,449 train-at-stop records,
 352,266 train runs observed, 222,811 of them with at least one segment comparable to schedule.
-`scripts/verify_kpis.py` recomputes each number below from the fact tables.
+The tests in `tests/kpi/` recompute each number below from the fact tables on every build.
+
+| Figure | All days | Weekdays | Definition |
+|---|---|---|---|
+| Late trips | **11.0%** | 11.9% | Share of compared train runs (222,811 on all days) more than 5 minutes over scheduled time |
+| Excess per trip | **+35.2 s** | +46.4 s | Average per train run; on all days 1.9% of an average 31-minute scheduled run (weekdays 2.4%) |
+| Long gaps | **17.3%** | 17.9% | Share of departures (3,131,460 on all days) more than 1.5x the scheduled gap after the previous train |
+
+Weekdays exclude holidays (Labor Day, 2026-09-07, is the one holiday in the window).
 
 | Figure | Value | Definition |
 |---|---|---|
-| Late trips | **11.0%** | Share of 222,811 compared train runs more than 5 minutes over scheduled time |
-| Excess per trip | **+35.2 s** | Average per train run; 1.9% of an average 31-minute scheduled run |
-| Long gaps | **17.3%** | Share of 3,131,460 departures more than 1.5x the scheduled gap after the previous train |
 | Weekday entries during long gaps | **about 50,300** | Of 302,700 average weekday gate entries at 68 gated stations (16.6%). Average over all days, weekends included: about 39,600 |
 | Red Line excess per trip | **+145.5 s** | Same per-trip grain as the system figure |
+
+Line figures below are over all days; time-of-day and station figures say weekday where they are.
 
 - **Red Line is most often late: 20.9% of its trips are 5+ minutes over,** and it averages
   145.5 s over per trip. Part of that is length: a Red Line trip is scheduled for 38 minutes on

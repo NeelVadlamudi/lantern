@@ -22,8 +22,10 @@ pattern_stations as (
     select
         station_id,
         string_agg(distinct route_id, ',' order by route_id) as route_ids,
-        string_agg(distinct case when route_id like 'Green-%' then 'Green' else route_id end, ',')
-            as line_ids
+        string_agg(
+            distinct case when route_id like 'Green-%' then 'Green' else route_id end, ','
+            order by case when route_id like 'Green-%' then 'Green' else route_id end
+        ) as line_ids
     from {{ ref('int_line_stop_sequence') }}
     group by station_id
 

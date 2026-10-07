@@ -1,7 +1,9 @@
 name: dbt CI
 
 # Runs on every push and pull request against the committed sample in data/sample/
-# (two real service dates). No network calls to MBTA, no secrets.
+# (two real service dates). Only dbt, DuckDB and sqlfluff run here; the sample is read in place
+# with --vars '{use_sample: true}'. No calls to MBTA, no secrets. The one download is the DuckDB
+# httpfs extension that profiles.yml loads.
 
 on:
   push:
@@ -31,7 +33,7 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install
+      - name: Install dbt and sqlfluff
         run: pip install -r requirements.txt
 
       - name: dbt deps
@@ -40,26 +42,20 @@ jobs:
       - name: Lint SQL
         run: sqlfluff lint models tests
 
-      - name: Load day 1 of the sample
-        run: |
-          python scripts/load_raw.py lamp --sample --end 2026-08-27
-          python scripts/load_raw.py gtfs --sample
-          python scripts/load_raw.py opendata --sample
+      # Day 1: full build of the first sample date. The on-run-end hook writes out/board_data.json
+      # and out/build_results.json only if every model and test passed.
+      - name: dbt build (full refresh, sample day 1)
+        run: dbt build --profiles-dir . --full-refresh --vars '{use_sample: true, lamp_end_date: 2026-08-27}'
 
-      - name: dbt build (full)
-        run: dbt build --profiles-dir . --full-refresh
-
-      - name: Load day 2 and build incrementally
+      # Day 2: incremental build. tests/incremental/ checks a new date was added, older dates were
+      # not rebuilt, and fact rows per date equal staging.
+      - name: dbt build (incremental, sample day 2)
         run: |
-          python scripts/check_incremental.py save
-          python scripts/load_raw.py lamp --sample --start 2026-08-28
-          dbt build --profiles-dir .
-          python scripts/check_incremental.py compare
+          dbt run-operation save_incremental_state --profiles-dir . --vars '{use_sample: true}'
+          dbt build --profiles-dir . --vars '{use_sample: true, lamp_end_date: 2026-08-28, check_incremental: true}'
 
-      - name: Export board data and verify
-        run: |
-          python scripts/export_board.py
-          python scripts/verify_kpis.py
+      - name: Check the build recorded no failures
+        run: dbt test --profiles-dir . --select assert_build_has_no_failures --vars '{use_sample: true, check_build: true}'
 
       - name: Docs
-        run: dbt docs generate --profiles-dir . --static --target-path target_docs
+        run: dbt docs generate --profiles-dir . --static --target-path target_docs --vars '{use_sample: true}'

@@ -9,6 +9,7 @@
 
 select
     service_date,
+    day_type,
     station_id,
     line_id,
     service_period_id,

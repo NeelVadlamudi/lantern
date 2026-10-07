@@ -1,4 +1,21 @@
+{{
+    config(
+        materialized='incremental',
+        on_schema_change='fail',
+        pre_hook="{{ clear_reference_table() }}"
+    )
+}}
+
 -- Grain: one row per service date, station, line and 30-minute bin.
+-- Stored as a table and re-read from the remote file only on the first build, on --full-refresh
+-- or with --vars '{refresh_reference: true}' (see clear_reference_table()).
+
+{% if keep_reference_table() %}
+
+    select * from {{ this }}
+    where false
+
+{% else %}
 
 with source as (
 
@@ -16,3 +33,5 @@ select
     route_or_line,
     cast(gated_entries as double) as gated_entries
 from source
+
+{% endif %}

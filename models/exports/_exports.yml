@@ -156,3 +156,42 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [branch_route_id, direction_id, point_order]
+
+  # board_data.json: these three are DuckDB tables (not Parquet files). The on-run-end hook
+  # (macros/write_build_outputs.sql) copies the board_payload row to out/board_data.json.
+  - name: board_line_totals
+    description: "Grain: one row per subway route over the service-date window. Pooled line figures for the lines block and the worst-line tile."
+    columns:
+      - name: route_id
+        description: MBTA V3 API route id.
+        data_tests:
+          - unique
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+
+  - name: board_tiles
+    description: "Grain: one row per headline tile. `tile` is the JSON object written to board_data.json tiles; value_number / value_text are the headline value for the tests in tests/kpi/."
+    columns:
+      - name: tile_id
+        data_tests:
+          - unique
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [late_trip_share, avg_trip_excess_seconds, long_gap_share, weekday_entries_in_long_gaps, worst_line, freshness]
+      - name: tile
+        data_tests:
+          - not_null
+
+  - name: board_payload
+    description: "Grain: exactly one row. One JSON column per top-level block of out/board_data.json except `build`, which the on-run-end hook adds from the run results and the project graph."
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "json_array_length(tiles) = 6 and json_array_length(lines) = 8"
+    columns:
+      - name: meta
+        data_tests:
+          - not_null

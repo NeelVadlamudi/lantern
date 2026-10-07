@@ -646,6 +646,18 @@ models:
               arguments:
                 to: ref('dim_dates')
                 field: date_key
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday for the service date, from dim_dates.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
       - name: trips
         data_type: bigint
         description: Train runs observed (distinct trip, route and vehicle).
@@ -1187,6 +1199,18 @@ models:
               arguments:
                 to: ref('dim_dates')
                 field: date_key
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday for the service date, from dim_dates.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
       - name: service_period_id
         data_type: varchar
         description: MBTA service period (Service Delivery Policy). Joins to dim_service_periods.

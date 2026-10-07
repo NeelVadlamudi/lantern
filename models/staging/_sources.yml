@@ -1,85 +1,92 @@
 version: 2
 
+# Every source is a public file read directly by DuckDB (httpfs), with no copy step.
+# `external_location` is the read expression that {{ source() }} renders to.
+# --vars '{use_sample: true}' points every source at the small committed copies in data/sample/.
+# The *_url vars override a location (for example a local mirror).
+
 sources:
   - name: lamp
     description: >
-      MBTA LAMP (Lightweight Application for Measuring Performance) public exports, landed
-      unchanged by scripts/load_raw.py. https://performancedata.mbta.com
-    schema: raw
+      MBTA LAMP (Lightweight Application for Measuring Performance) public exports.
+      https://performancedata.mbta.com. Subway on-time performance is published as one Parquet
+      file per service date; the index lists every file. stg_lamp__subway_trip_stops reads the
+      files it needs straight from the URLs in the index (see macros/lamp_files.sql).
     tables:
-      - name: lamp_subway_on_time
+      - name: lamp_index
         description: >
-          Subway on-time performance, one Parquet file per service date. One row per
-          trip-stop pair observed in real time (GTFS-RT vehicle positions), with LAMP-calculated
-          travel, dwell and headway times and the matching scheduled values from GTFS.
-          Field definitions: https://github.com/mbta/lamp/blob/main/Data_Dictionary.md
-        loaded_at_field: "strptime(cast(service_date as varchar), '%Y%m%d')"
+          index.csv of the subway on-time performance files: one row per service date with the
+          file URL, size and last-modified time. Read as text; dates are cast where used. Field definitions for the files themselves:
+          https://github.com/mbta/lamp/blob/main/Data_Dictionary.md
         config:
+          external_location: >-
+            read_csv('{{ var('lamp_index_url', 'data/sample/lamp/index.csv' if var('use_sample', false)
+            else 'https://performancedata.mbta.com/lamp/subway-on-time-performance-v1/index.csv') }}',
+            header = true, all_varchar = true)
+          loaded_at_field: "cast(service_date as timestamp)"
           freshness:
             warn_after: {count: 2, period: day}
             error_after: {count: 4, period: day}
         columns:
           - name: service_date
-            description: Service date as an integer (YYYYMMDD). A service date runs past midnight.
+            description: Service date of the file.
             data_tests:
               - not_null
-          - name: trip_id
-            description: GTFS-RT trip id. Trips not in the schedule start with ADDED-.
+          - name: file_url
+            description: URL of the Parquet file for that service date.
             data_tests:
               - not_null
-          - name: stop_id
-            description: Platform-level GTFS stop id.
-            data_tests:
-              - not_null
-          - name: parent_station
-            description: GTFS parent station id (place-*).
-          - name: route_id
-            description: GTFS route id (Red, Orange, Blue, Green-B..E, Mattapan).
-          - name: travel_time_seconds
-            description: Seconds from the previous stop on the trip to this stop.
-          - name: scheduled_travel_time
-            description: Planned seconds from the previous stop, from GTFS stop_times.
-          - name: headway_trunk_seconds
-            description: Seconds since the previous train departed this parent station on the same trunk line.
-          - name: scheduled_headway_trunk
-            description: Planned trunk headway at this parent station.
-          - name: _loaded_at
-            description: UTC time the row was written by the loader.
 
   - name: gtfs
     description: >
       LAMP compressed GTFS archive. Every GTFS schedule the MBTA has published, one Parquet file
       per year and GTFS file. gtfs_active_date / gtfs_end_date (YYYYMMDD) give the service dates
-      each record applied to. https://performancedata.mbta.com
-    schema: raw
+      each record applied to. https://performancedata.mbta.com/lamp/gtfs_archive/
+      Years read: var('gtfs_years') (default [2026]); the test assert_gtfs_covers_lamp_window
+      fails if the LAMP window needs a year that is not listed.
+    config:
+      external_location: >-
+        read_parquet([{% for y in var('gtfs_years', [2026]) %}'{{ var('gtfs_archive_url',
+        'data/sample/gtfs' if var('use_sample', false) else 'https://performancedata.mbta.com/lamp/gtfs_archive')
+        }}/{{ y }}/{identifier}.parquet'{{ ', ' if not loop.last }}{% endfor %}], union_by_name = true)
     tables:
       - name: gtfs_stops
-        description: GTFS stops.txt rows, all versions for the loaded years.
+        identifier: stops
+        description: GTFS stops.txt rows, all versions for the listed years.
       - name: gtfs_routes
-        description: GTFS routes.txt rows, all versions for the loaded years.
+        identifier: routes
+        description: GTFS routes.txt rows, all versions for the listed years.
       - name: gtfs_route_patterns
-        description: MBTA GTFS extension route_patterns.txt, all versions for the loaded years.
+        identifier: route_patterns
+        description: MBTA GTFS extension route_patterns.txt, all versions for the listed years.
       - name: gtfs_stop_times
+        identifier: stop_times
         description: >
-          GTFS stop_times.txt, filtered by the loader to the representative trip of each subway
-          route pattern (used only for stop order).
+          GTFS stop_times.txt (about 80 MB a year). Staging keeps only the representative trip of
+          each subway route pattern.
       - name: gtfs_trips
-        description: GTFS trips.txt, filtered by the loader to representative trips of subway route patterns.
+        identifier: trips
+        description: GTFS trips.txt. Staging keeps only representative trips of subway route patterns.
       - name: gtfs_shapes
-        description: GTFS shapes.txt, filtered by the loader to the shapes of those representative trips.
+        identifier: shapes
+        description: GTFS shapes.txt. Staging keeps only the shapes of those representative trips.
 
   - name: mbta_open_data
     description: >
-      MBTA Open Data Portal (ArcGIS Hub) CSV downloads, landed as text.
+      MBTA Open Data Portal (ArcGIS Hub) CSV downloads, read as text.
       https://mbta-massdot.opendata.arcgis.com
-    schema: raw
     tables:
       - name: mbta_gated_station_entries
         description: >
           Fare gate entries by station, line and 30-minute period per service date
           (hub item 001c177f07594e7c99f193dde32284c9). Counts can be fractional: the MBTA
           splits entries at shared stations across lines.
-        loaded_at_field: _loaded_at
+        config:
+          external_location: >-
+            read_csv('{{ var('gated_entries_url', 'data/sample/opendata/gated_station_entries.csv.gz'
+            if var('use_sample', false)
+            else 'https://mbta-massdot.opendata.arcgis.com/api/download/v1/items/001c177f07594e7c99f193dde32284c9/csv?layers=0') }}',
+            header = true, all_varchar = true)
         columns:
           - name: service_date
           - name: time_period
@@ -92,3 +99,9 @@ sources:
         description: >
           Monthly ridership by mode and line as reported to the National Transit Database
           (hub item 2048258a18354256a650d41f8fe4532c).
+        config:
+          external_location: >-
+            read_csv('{{ var('monthly_ridership_url', 'data/sample/opendata/monthly_ridership_by_mode_line.csv.gz'
+            if var('use_sample', false)
+            else 'https://mbta-massdot.opendata.arcgis.com/api/download/v1/items/2048258a18354256a650d41f8fe4532c/csv?layers=0') }}',
+            header = true, all_varchar = true)

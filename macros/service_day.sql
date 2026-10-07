@@ -28,3 +28,10 @@
 {% macro safe_ratio(numerator, denominator) -%}
     ({{ numerator }})::double / nullif(({{ denominator }})::double, 0)
 {%- endmacro %}
+
+{#- Round a DOUBLE for display in board_data.json. DuckDB's round() scales by 10^n first, which
+    can push a value like -27.45 (stored as -27.4499...) across the half; formatting with printf
+    rounds the stored value exactly, the same way the board's numbers have always been rounded. -#}
+{% macro board_round(column, digits) -%}
+    cast(printf('%.{{ digits }}f', {{ column }}) as double)
+{%- endmacro %}

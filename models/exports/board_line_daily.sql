@@ -4,7 +4,7 @@
     )
 }}
 -- Board file: daily reliability per line (mart_line_daily_reliability + route display fields).
--- Grain: one row per route and service date.
+-- Grain: one row per route and service date. day_type: weekday, saturday, sunday or holiday.
 
 select
     d.route_id,
@@ -12,6 +12,7 @@ select
     r.display_name,
     r.route_color_hex,
     d.service_date,
+    d.day_type,
     d.trips,
     d.trips_compared,
     d.trip_stop_events,

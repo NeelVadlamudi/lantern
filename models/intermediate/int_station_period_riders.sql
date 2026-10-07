@@ -72,7 +72,10 @@ select
     in_basis.line_id,
     in_basis.day_type,
     in_basis.service_period_id,
-    sum(in_basis.gated_entries) / max(days_per_type.basis_days) as avg_daily_gated_entries,
+    -- Entries carry at most two decimals; summing them as DECIMAL keeps the sum exact, so the
+    -- average is the same on every build (a DOUBLE sum depends on the order rows arrive in).
+    sum(cast(in_basis.gated_entries as decimal(18, 2))) / max(days_per_type.basis_days)
+        as avg_daily_gated_entries,
     max(days_per_type.basis_days) as basis_days,
     max(basis.basis_start_date) as basis_start_date,
     max(basis.basis_end_date) as basis_end_date

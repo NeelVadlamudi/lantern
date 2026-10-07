@@ -4,11 +4,11 @@
 
 | Layer | Folder | Prefix | Materialization | Access | Rules |
 |---|---|---|---|---|---|
-| Sources | `models/staging/_sources.yml` | `raw.*` | tables written by `scripts/load_raw.py` | | Landed unchanged. Freshness on LAMP. |
-| Staging | `models/staging` | `stg_<source>__<entity>` | view | | One model per source table. Rename, cast, convert time zones, dedupe. No joins, no business rules. |
+| Sources | `models/staging/_sources.yml` | | public files read in place (`external_location`) | | No copy step. Freshness on the LAMP index. |
+| Staging | `models/staging` | `stg_<source>__<entity>` | LAMP incremental; GTFS and Open Data tables kept between builds | | One model per source table. Rename, cast, convert time zones, dedupe. No joins and no business rules, except the representative-trip filter on GTFS stop_times, trips and shapes. |
 | Intermediate | `models/intermediate` | `int_<entity>__<verb>` or `int_<entity>` | view | protected | Joins and business logic that more than one mart needs. Not for direct use. |
 | Marts | `models/marts` | `dim_`, `fct_`, `mart_` | table (fact is incremental) | public | Contract enforced. Grain stated in the first sentence of every description. |
-| Exports | `models/exports` | `board_` | external Parquet in `out/` (zstd) | | Column subsets of marts for the board. No logic beyond selecting, renaming and sorting. |
+| Exports | `models/exports` | `board_` | external Parquet in `out/` (zstd); `board_tiles`, `board_line_totals`, `board_payload` are tables | | Column subsets of marts for the board. No logic beyond selecting, renaming and sorting, except the three JSON models, which pool and format the marts for `out/board_data.json`. |
 
 - `dim_` = one row per thing; `fct_` = one row per event; `mart_` = an aggregate answering a
   question (line by day, station by period, and so on).
@@ -63,5 +63,5 @@ Thresholds live in `dbt_project.yml` vars, not in SQL: `late_trip_seconds`, `lon
 ## Changes to marts
 
 Public marts have enforced contracts. Renaming or retyping a column is a breaking change: update
-the YAML contract, the board exports and `scripts/export_board.py` in the same commit, and
+the YAML contract, the board exports and `board_payload` / `board_tiles` in the same commit, and
 mention it in the commit message.

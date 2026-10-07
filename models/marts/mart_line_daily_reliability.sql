@@ -3,6 +3,7 @@
 -- the same grain as the systemwide figures. Longer lines collect more excess per trip, so
 -- excess_share_of_scheduled (excess / scheduled run time) is included to compare lines fairly.
 -- The *_sum and count columns are additive across dates; shares and averages are not.
+-- day_type (weekday / saturday / sunday / holiday) comes from dim_dates.
 
 with events as (
 
@@ -59,6 +60,7 @@ select
     cast(event_stats.route_id as varchar) as route_id,
     cast(event_stats.service_date as date) as service_date,
     cast(strftime(event_stats.service_date, '%Y%m%d') as integer) as date_key,
+    cast(dates.day_type as varchar) as day_type,
     cast(trip_stats.trips as bigint) as trips,
     cast(trip_stats.trips_compared as bigint) as trips_compared,
     cast(event_stats.trip_stop_events as bigint) as trip_stop_events,
@@ -84,3 +86,5 @@ from event_stats
 left join trip_stats
     on event_stats.route_id = trip_stats.route_id
         and event_stats.service_date = trip_stats.service_date
+inner join {{ ref('dim_dates') }} as dates
+    on event_stats.service_date = dates.date_day
