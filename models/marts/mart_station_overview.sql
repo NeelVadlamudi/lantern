@@ -62,6 +62,13 @@ weekday_riders as (
 
 ),
 
+gated as (
+
+    -- stations present in the gated-entry basis, whether or not trains ran there in the window
+    select distinct station_id from {{ ref('int_station_period_riders') }}
+
+),
+
 window_days as (
 
     select count(*) as n_days from {{ ref('dim_dates') }}
@@ -91,7 +98,8 @@ select
     cast(rolled.est_window_entries_in_long_gaps / window_days.n_days as double)
         as est_daily_entries_in_long_gaps,
     cast(weekday_riders.weekday_gated_entries as double) as weekday_gated_entries,
-    cast(weekday_riders.weekday_entries_in_long_gaps as double) as weekday_entries_in_long_gaps
+    cast(weekday_riders.weekday_entries_in_long_gaps as double) as weekday_entries_in_long_gaps,
+    cast(gated.station_id is not null as boolean) as has_gated_entries
 from {{ ref('dim_stations') }} as stations
 cross join window_days
 left join rolled
@@ -100,4 +108,6 @@ left join daily_riders
     on stations.station_id = daily_riders.station_id
 left join weekday_riders
     on stations.station_id = weekday_riders.station_id
+left join gated
+    on stations.station_id = gated.station_id
 where stations.is_on_canonical_pattern

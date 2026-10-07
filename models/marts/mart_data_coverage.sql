@@ -22,7 +22,7 @@ stations as (
 
     select
         station_id,
-        has_rider_data
+        has_gated_entries
     from {{ ref('mart_station_overview') }}
 
 ),
@@ -31,7 +31,7 @@ joined as (
 
     select
         events.*,
-        coalesce(stations.has_rider_data, false) as has_rider_data
+        coalesce(stations.has_gated_entries, false) as has_gated_entries
     from events
     left join stations
         on events.station_id = stations.station_id
@@ -51,9 +51,9 @@ select
     cast(avg(cast(no_scheduled_travel and no_scheduled_headway as int)) as double)
         as share_without_any_schedule,
     cast(count(distinct station_id) as bigint) as stations_served,
-    cast(count(distinct station_id) filter (where not has_rider_data) as bigint)
+    cast(count(distinct station_id) filter (where not has_gated_entries) as bigint)
         as stations_without_gated_entries,
-    cast(count(*) filter (where not has_rider_data) as bigint) as events_at_ungated_stations,
-    cast(avg(cast(not has_rider_data as int)) as double) as share_events_at_ungated_stations
+    cast(count(*) filter (where not has_gated_entries) as bigint) as events_at_ungated_stations,
+    cast(avg(cast(not has_gated_entries as int)) as double) as share_events_at_ungated_stations
 from joined
 group by route_id

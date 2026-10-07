@@ -1038,6 +1038,13 @@ models:
           Average weekday: sum over lines and service periods of gated entries x long-gap share. Estimated
           entries made during a long gap; an index, not a head count. Each entry is counted once (gated
           entries are attributed to one line per gate).
+      - name: has_gated_entries
+        data_type: boolean
+        description: >-
+          True when the station appears in the gated-entry basis (has fare-gate data), even if no trains
+          ran there in the window.
+        data_tests:
+          - not_null
   - name: mart_line_shapes
     description: >-
       Track geometry per line branch and direction, for drawing the network. Grain: one row per branch,
@@ -1215,7 +1222,8 @@ models:
       How much of the data can be compared to the schedule and weighted by riders. Grain: one row per
       GTFS route over the loaded window. No scheduled travel = LAMP scheduled run time missing or not
       above zero; no scheduled headway = scheduled trunk gap missing or zero. Ungated stations have no
-      gated-entry data (Green Line surface and Extension stops, Mattapan trolley stops).
+      gated-entry data: Green Line surface stops, Symphony, Mattapan trolley stops other than Ashmont
+      and Mattapan, and Longwood (gated rows without a stop id).
     config:
       contract:
         enforced: true
@@ -1280,5 +1288,5 @@ models:
       - name: share_events_at_ungated_stations
         data_type: double
         description: >-
-          events_at_ungated_stations / trip_stop_events. For Green Line routes this is the surface (ungated)
-          share.
+          events_at_ungated_stations / trip_stop_events. For Green Line routes this approximates the surface
+          share (Symphony and Longwood are the only ungated stations that are not surface stops).

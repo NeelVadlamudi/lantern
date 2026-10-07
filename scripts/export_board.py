@@ -201,7 +201,7 @@ def main() -> None:
             sum(weekday_gated_entries) as weekday_gated_entries,
             sum(est_daily_entries_in_long_gaps) as all_days_entries_in_long_gaps,
             sum(avg_daily_gated_entries) as all_days_gated_entries,
-            count(*) filter (where has_rider_data) as stations_with_gates,
+            count(*) filter (where has_gated_entries) as stations_with_gates,
             count(*) as stations
         from marts.mart_station_overview
     """)
@@ -330,10 +330,10 @@ def main() -> None:
     """)
     ungated = rows(con, """
         select station_id, station_name, line_ids from marts.mart_station_overview
-        where not has_rider_data order by line_ids, station_id
+        where not has_gated_entries order by line_ids, station_id
     """)
     green_st = one(con, """
-        select count(*) as stations, count(*) filter (where not has_rider_data) as ungated
+        select count(*) as stations, count(*) filter (where not has_gated_entries) as ungated
         from marts.mart_station_overview where list_contains(string_split(line_ids, ','), 'Green')
     """)
     tot = lambda key, rs: sum(x[key] for x in rs)
