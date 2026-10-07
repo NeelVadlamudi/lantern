@@ -1,0 +1,158 @@
+version: 2
+
+models:
+  - name: board_line_daily
+    description: "Parquet file out/line_daily.parquet. Grain: one row per route and service date."
+    columns:
+      - name: route_id
+        description: MBTA V3 API route id.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+      - name: service_date
+        data_tests:
+          - not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [route_id, service_date]
+
+  - name: board_line_periods
+    description: "Parquet file out/line_periods.parquet. Grain: one row per route, day type and service period."
+    columns:
+      - name: route_id
+        description: MBTA V3 API route id.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [route_id, day_type, service_period_id]
+
+  - name: board_station_periods
+    description: "Parquet file out/station_periods.parquet. Grain: one row per station, trunk line, day type and service period."
+    columns:
+      - name: station_id
+        description: GTFS parent station id (place-*), same as the MBTA V3 API stop id.
+        data_tests:
+          - not_null
+          - has_prefix:
+              arguments:
+                prefix: place-
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [station_id, line_id, day_type, service_period_id]
+
+  - name: board_map_stations
+    description: "Parquet file out/map_stations.parquet. Grain: one row per station on the subway network."
+    columns:
+      - name: station_id
+        description: GTFS parent station id (place-*), same as the MBTA V3 API stop id.
+        data_tests:
+          - unique
+          - not_null
+          - has_prefix:
+              arguments:
+                prefix: place-
+      - name: latitude
+        data_tests:
+          - not_null
+      - name: longitude
+        data_tests:
+          - not_null
+      - name: route_ids
+        description: List of MBTA V3 API route ids serving the station (checked by assert_board_route_ids_valid).
+
+  - name: board_line_stops
+    description: "Parquet file out/line_stops.parquet. Grain: one row per branch, direction and stop position."
+    columns:
+      - name: route_id
+        description: MBTA V3 API route id.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+      - name: station_id
+        description: GTFS parent station id (place-*), same as the MBTA V3 API stop id.
+        data_tests:
+          - not_null
+          - has_prefix:
+              arguments:
+                prefix: place-
+      - name: stop_order
+        data_tests:
+          - contiguous_sequence:
+              arguments:
+                partition_by: [branch_route_id, direction_id]
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [branch_route_id, direction_id, stop_order]
+
+  - name: board_service_periods
+    description: "Parquet file out/service_periods.parquet. Grain: one row per service period."
+    columns:
+      - name: service_period_id
+        data_tests:
+          - unique
+          - not_null
+
+  - name: board_routes
+    description: "Parquet file out/routes.parquet. Grain: one row per subway route."
+    columns:
+      - name: route_id
+        description: MBTA V3 API route id.
+        data_tests:
+          - unique
+          - accepted_values:
+              arguments:
+                values: [Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+
+  - name: board_station_daily
+    description: >
+      Parquet file out/station_daily.parquet. Grain: one row per station, trunk line, service
+      date and service period. Additive counts so the board can filter any date range.
+    columns:
+      - name: station_id
+        description: GTFS parent station id (place-*), same as the MBTA V3 API stop id.
+        data_tests:
+          - not_null
+          - has_prefix:
+              arguments:
+                prefix: place-
+      - name: service_date
+        data_tests:
+          - not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [service_date, station_id, line_id, service_period_id]
+
+  - name: board_line_shapes
+    description: >
+      Parquet file out/line_shapes.parquet. Grain: one row per branch, direction and point on
+      the canonical track shape.
+    columns:
+      - name: route_id
+        description: MBTA V3 API route id.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+      - name: point_order
+        data_tests:
+          - contiguous_sequence:
+              arguments:
+                partition_by: [branch_route_id, direction_id]
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [branch_route_id, direction_id, point_order]

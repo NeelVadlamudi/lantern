@@ -1,0 +1,1284 @@
+version: 2
+models:
+  - name: dim_dates
+    description: >-
+      Calendar dimension. Grain: one row per date between the first and last loaded service date. Also
+      the metric time spine.
+    config:
+      contract:
+        enforced: true
+    time_spine:
+      standard_granularity_column: date_day
+    columns:
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD.
+        data_tests:
+          - unique
+          - not_null
+      - name: date_day
+        data_type: date
+        description: Calendar date.
+        data_tests:
+          - unique
+          - not_null
+        granularity: day
+      - name: day_name
+        data_type: varchar
+        description: Day name, e.g. Monday.
+      - name: iso_day_of_week
+        data_type: integer
+        description: ISO day of week, 1 = Monday.
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday (holidays from the holidays seed).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
+      - name: is_holiday
+        data_type: boolean
+        description: True when the date is in the holidays seed.
+      - name: holiday_name
+        data_type: varchar
+        description: Holiday name, if any.
+      - name: month_start_date
+        data_type: date
+        description: First day of the month.
+      - name: week_start_date
+        data_type: date
+        description: Monday of the ISO week.
+  - name: dim_service_periods
+    description: >-
+      MBTA weekday time periods from the Service Delivery Policy (Dec 2025, Table 1). Grain: one row per
+      period.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: service_period_id
+        data_type: varchar
+        description: MBTA service period (Service Delivery Policy). Joins to dim_service_periods.
+        data_tests:
+          - unique
+          - not_null
+      - name: service_period_name
+        data_type: varchar
+        description: Period name as written in the policy.
+      - name: start_minute
+        data_type: integer
+        description: First minute of the period (minutes after midnight).
+      - name: end_minute
+        data_type: integer
+        description: Last minute of the period (inclusive).
+      - name: clock_range
+        data_type: varchar
+        description: Clock range, e.g. 07:00-08:59.
+      - name: sort_order
+        data_type: integer
+        description: Order through the service day, starting at Sunrise.
+  - name: dim_routes
+    description: >-
+      Subway routes. Grain: one row per GTFS route id. Attributes from the GTFS version active on the
+      latest loaded service date.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: route_key
+        data_type: varchar
+        description: Surrogate key (hash of route_id).
+        data_tests:
+          - unique
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id: Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue.
+          Joins to dim_routes.'
+        data_tests:
+          - unique
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Red
+                  - Mattapan
+                  - Orange
+                  - Green-B
+                  - Green-C
+                  - Green-D
+                  - Green-E
+                  - Blue
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green, Blue.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Red
+                  - Mattapan
+                  - Orange
+                  - Green
+                  - Blue
+      - name: route_name
+        data_type: varchar
+        description: GTFS route_long_name.
+        data_tests:
+          - not_null
+      - name: line_name
+        data_type: varchar
+        description: Line name.
+      - name: branch_name
+        data_type: varchar
+        description: Green Line branch letter, if any.
+      - name: display_name
+        data_type: varchar
+        description: Label for charts.
+      - name: transit_mode
+        data_type: varchar
+        description: heavy rail or light rail (GTFS route_type).
+      - name: route_color_hex
+        data_type: varchar
+        description: 'Official MBTA route color from GTFS routes.route_color, as #RRGGBB.'
+        data_tests:
+          - not_null
+      - name: route_text_color_hex
+        data_type: varchar
+        description: Official text color on the route color.
+      - name: display_order
+        data_type: integer
+        description: Sort order for charts.
+  - name: dim_stations
+    description: >-
+      Subway stations. Grain: one row per GTFS parent station on a canonical subway route pattern or seen
+      in LAMP data. Coordinates are WGS84 from GTFS stops.txt in the version active on the latest loaded
+      service date.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: station_key
+        data_type: varchar
+        description: Surrogate key (hash of station_id).
+        data_tests:
+          - unique
+          - not_null
+      - name: station_id
+        data_type: varchar
+        description: GTFS parent station id (place-*). Joins to dim_stations.
+        data_tests:
+          - unique
+          - not_null
+      - name: station_name
+        data_type: varchar
+        description: Station name from GTFS stops.txt.
+        data_tests:
+          - not_null
+      - name: latitude
+        data_type: double
+        description: WGS84 latitude from GTFS stops.txt.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 42.1
+                max_value: 42.5
+      - name: longitude
+        data_type: double
+        description: WGS84 longitude from GTFS stops.txt.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -71.3
+                max_value: -70.9
+      - name: municipality
+        data_type: varchar
+        description: City or town.
+      - name: is_wheelchair_accessible
+        data_type: boolean
+        description: GTFS wheelchair_boarding = 1.
+      - name: route_ids
+        data_type: varchar
+        description: Comma-separated GTFS route ids whose canonical pattern stops here.
+      - name: line_ids
+        data_type: varchar
+        description: Comma-separated trunk lines serving the station.
+      - name: is_on_canonical_pattern
+        data_type: boolean
+        description: True when the station is on a canonical route pattern.
+      - name: is_observed_in_lamp
+        data_type: boolean
+        description: True when the station appears in the loaded LAMP data.
+  - name: mart_line_stop_sequence
+    description: >-
+      Ordered stations per line branch and direction, for drawing the network. Grain: one row per branch,
+      direction and stop position on the canonical route pattern of the GTFS version active on the latest
+      loaded service date.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: line_stop_key
+        data_type: varchar
+        description: Surrogate key (branch, direction, GTFS stop_sequence).
+        data_tests:
+          - unique
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id: Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue.
+          Joins to dim_routes.'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_routes')
+                field: route_id
+      - name: branch_route_id
+        data_type: varchar
+        description: 'Branch: Red-A (Ashmont), Red-B (Braintree), Green-B..E; otherwise the route id.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Red-A
+                  - Red-B
+                  - Mattapan
+                  - Orange
+                  - Green-B
+                  - Green-C
+                  - Green-D
+                  - Green-E
+                  - Blue
+      - name: direction_id
+        data_type: integer
+        description: GTFS direction id, 0 or 1.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 0
+                  - 1
+      - name: direction_name
+        data_type: varchar
+        description: Direction label from GTFS directions.txt (e.g. South, North, West, East, Inbound,
+          Outbound).
+      - name: direction_destination
+        data_type: varchar
+        description: Destination label for the direction (GTFS directions.txt).
+      - name: route_pattern_name
+        data_type: varchar
+        description: GTFS route pattern name, e.g. Alewife - Ashmont.
+      - name: route_pattern_id
+        data_type: varchar
+        description: GTFS route pattern id (canonical pattern).
+      - name: stop_order
+        data_type: integer
+        description: Position on the pattern, 1 = first stop.
+        data_tests:
+          - not_null
+          - contiguous_sequence:
+              arguments:
+                partition_by:
+                  - branch_route_id
+                  - direction_id
+      - name: stops_on_pattern
+        data_type: integer
+        description: Number of stops on the pattern.
+      - name: station_id
+        data_type: varchar
+        description: GTFS parent station id (place-*). Joins to dim_stations.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_stations')
+                field: station_id
+      - name: station_name
+        data_type: varchar
+        description: Station name from GTFS stops.txt.
+      - name: latitude
+        data_type: double
+        description: WGS84 latitude from GTFS stops.txt.
+        data_tests:
+          - not_null
+      - name: longitude
+        data_type: double
+        description: WGS84 longitude from GTFS stops.txt.
+        data_tests:
+          - not_null
+      - name: route_color_hex
+        data_type: varchar
+        description: 'Official MBTA route color from GTFS routes.route_color, as #RRGGBB.'
+        data_tests:
+          - not_null
+      - name: gtfs_as_of_date
+        data_type: date
+        description: Service date whose GTFS version supplied the pattern.
+  - name: fct_trip_stop_events
+    description: >-
+      Train arrivals at stops with schedule comparisons. Grain: one row per service date, trip, route,
+      vehicle and stop. Incremental on service_date (delete+insert on trip_stop_event_key, trailing var('incremental_lookback_days')
+      days reprocessed each run).
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: trip_stop_event_key
+        data_type: varchar
+        description: 'Surrogate key: service_date, trip_id, route_id, vehicle_label, stop_id.'
+        data_tests:
+          - unique
+          - not_null
+      - name: trip_key
+        data_type: varchar
+        description: Surrogate key of the train run. Joins to fct_trips.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_trips')
+                field: trip_key
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD. Joins to dim_dates.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: service_date
+        data_type: date
+        description: MBTA service date. Trips after midnight belong to the previous date.
+        data_tests:
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id: Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue.
+          Joins to dim_routes.'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_routes')
+                field: route_id
+      - name: branch_route_id
+        data_type: varchar
+        description: 'Branch: Red-A (Ashmont), Red-B (Braintree), Green-B..E; otherwise the route id.'
+        data_tests:
+          - not_null
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green, Blue.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Red
+                  - Mattapan
+                  - Orange
+                  - Green
+                  - Blue
+      - name: station_id
+        data_type: varchar
+        description: GTFS parent station id (place-*). Joins to dim_stations.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_stations')
+                field: station_id
+      - name: stop_id
+        data_type: varchar
+        description: GTFS platform stop id.
+        data_tests:
+          - not_null
+      - name: service_period_id
+        data_type: varchar
+        description: MBTA service period (Service Delivery Policy). Joins to dim_service_periods.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_service_periods')
+                field: service_period_id
+      - name: direction_id
+        data_type: integer
+        description: GTFS direction id, 0 or 1.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 0
+                  - 1
+      - name: direction_name
+        data_type: varchar
+        description: Direction label from GTFS directions.txt (e.g. South, North, West, East, Inbound,
+          Outbound).
+      - name: trip_id
+        data_type: varchar
+        description: GTFS-RT trip id (ADDED-* = not in the schedule).
+        data_tests:
+          - not_null
+      - name: vehicle_label
+        data_type: varchar
+        description: Car numbers of the train as reported by GTFS-RT.
+      - name: stop_sequence
+        data_type: integer
+        description: GTFS-RT stop sequence on the trip.
+      - name: is_added_trip
+        data_type: boolean
+        description: >-
+          True for trips not in the published schedule (trip id ADDED-*). LAMP matches them to the closest
+          scheduled trip for the scheduled_* values.
+      - name: event_local_at
+        data_type: timestamp
+        description: Boston local time the train stopped at the stop (or started toward it if no stop
+          was recorded).
+      - name: travel_time_seconds
+        data_type: bigint
+        description: >-
+          LAMP travel time: from starting toward the stop to stopping there (excludes dwell at the previous
+          stop).
+      - name: scheduled_travel_seconds
+        data_type: bigint
+        description: LAMP scheduled travel time from GTFS (includes dwell; see int_trip_stops__performance).
+      - name: actual_run_seconds
+        data_type: bigint
+        description: Arrival-to-arrival seconds from the previous observed stop (start-to-arrival for
+          the first segment).
+      - name: scheduled_run_seconds
+        data_type: bigint
+        description: >-
+          Scheduled seconds over the same span: arrival here minus scheduled departure at the previous
+          observed stop.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                where: scheduled_run_seconds is not null
+              config:
+                severity: warn
+      - name: excess_travel_seconds
+        data_type: bigint
+        description: actual_run_seconds - scheduled_run_seconds. Null when the segment can't be compared.
+      - name: dwell_time_seconds
+        data_type: bigint
+        description: Seconds stopped at this stop (LAMP).
+      - name: headway_seconds
+        data_type: bigint
+        description: Seconds since the previous train left this station on the same trunk line (LAMP trunk
+          headway).
+      - name: scheduled_headway_seconds
+        data_type: bigint
+        description: Scheduled trunk headway at this station.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                where: scheduled_headway_seconds is not null
+              config:
+                severity: warn
+      - name: headway_ratio
+        data_type: double
+        description: headway_seconds / scheduled_headway_seconds.
+      - name: has_travel_comparison
+        data_type: boolean
+        description: Both run times present, both above zero, actual not an outlier.
+      - name: has_headway_comparison
+        data_type: boolean
+        description: Both headways present and above zero.
+      - name: is_travel_outlier
+        data_type: boolean
+        description: actual_run_seconds above var('travel_outlier_seconds') (default 1800). Excluded from
+          travel metrics.
+      - name: is_long_gap
+        data_type: boolean
+        description: Headway more than var('long_gap_ratio') times scheduled.
+      - name: is_bunched
+        data_type: boolean
+        description: Headway under var('bunched_ratio') times scheduled.
+      - name: is_headway_adherent
+        data_type: boolean
+        description: Headway compared and neither long gap nor bunched.
+      - name: loaded_at
+        data_type: timestamp
+        description: UTC time the source row was loaded.
+  - name: fct_trips
+    description: >-
+      Train runs with trip-level schedule comparison. Grain: one row per service date, trip, route and
+      vehicle.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: trip_key
+        data_type: varchar
+        description: 'Surrogate key: service_date, trip_id, route_id, vehicle_label.'
+        data_tests:
+          - unique
+          - not_null
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD. Joins to dim_dates.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: service_date
+        data_type: date
+        description: MBTA service date. Trips after midnight belong to the previous date.
+        data_tests:
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id: Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue.
+          Joins to dim_routes.'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_routes')
+                field: route_id
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green, Blue.'
+        data_tests:
+          - not_null
+      - name: direction_id
+        data_type: integer
+        description: GTFS direction id, 0 or 1.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values:
+                  - 0
+                  - 1
+      - name: trip_id
+        data_type: varchar
+        description: GTFS-RT trip id.
+        data_tests:
+          - not_null
+      - name: vehicle_label
+        data_type: varchar
+        description: Car numbers of the train.
+      - name: is_added_trip
+        data_type: boolean
+        description: Trip not in the published schedule.
+      - name: first_event_local_at
+        data_type: timestamp
+        description: Boston local time of the first observed stop.
+      - name: start_service_period_id
+        data_type: varchar
+        description: Service period of the first observed stop.
+        data_tests:
+          - relationships:
+              arguments:
+                to: ref('dim_service_periods')
+                field: service_period_id
+      - name: trip_stop_events
+        data_type: bigint
+        description: Stops observed on the trip.
+      - name: compared_segments
+        data_type: bigint
+        description: Stop-to-stop segments compared to schedule.
+      - name: trip_excess_seconds
+        data_type: bigint
+        description: Sum of segment excess seconds. Negative = faster than scheduled.
+      - name: trip_scheduled_seconds
+        data_type: bigint
+        description: Scheduled seconds over the compared segments.
+      - name: is_late_trip
+        data_type: boolean
+        description: trip_excess_seconds above var('late_trip_seconds') (default 300).
+  - name: mart_line_daily_reliability
+    description: >-
+      Daily reliability per line. Grain: one row per GTFS route and service date. Trip measures are per
+      train run over trips with at least one compared segment, the same grain as the systemwide figures.
+      Longer lines collect more excess per trip; excess_share_of_scheduled normalizes for trip length.
+      Counts and *_sum columns are additive across dates.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: line_day_key
+        data_type: varchar
+        description: 'Surrogate key: route_id, service_date.'
+        data_tests:
+          - unique
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id: Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue.
+          Joins to dim_routes.'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_routes')
+                field: route_id
+      - name: service_date
+        data_type: date
+        description: MBTA service date. Trips after midnight belong to the previous date.
+        data_tests:
+          - not_null
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD. Joins to dim_dates.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: trips
+        data_type: bigint
+        description: Train runs observed (distinct trip, route and vehicle).
+        data_tests:
+          - not_null
+      - name: trips_compared
+        data_type: bigint
+        description: Trips with at least one stop-to-stop segment that could be compared to schedule.
+      - name: trip_stop_events
+        data_type: bigint
+        description: Train arrivals at stops observed.
+      - name: travel_comparisons
+        data_type: bigint
+        description: Stop-to-stop segments with both an actual and a scheduled run time.
+      - name: avg_trip_excess_seconds
+        data_type: double
+        description: >-
+          Per train run: sum of stop-to-stop excess seconds over the trip's compared segments, averaged
+          over compared trips. Negative = faster than scheduled.
+      - name: late_trip_share
+        data_type: double
+        description: >-
+          Share of compared trips that ran more than var('late_trip_seconds') (default 300 s) over scheduled
+          run time.
+        data_tests:
+          - is_share
+      - name: late_trips
+        data_type: bigint
+        description: Compared trips more than var('late_trip_seconds') over scheduled run time.
+        data_tests:
+          - not_null
+      - name: trip_excess_seconds_sum
+        data_type: bigint
+        description: Sum over compared trips of trip excess seconds.
+      - name: trip_scheduled_seconds_sum
+        data_type: bigint
+        description: Sum over compared trips of scheduled run seconds on the compared segments.
+      - name: excess_share_of_scheduled
+        data_type: double
+        description: >-
+          trip_excess_seconds_sum / trip_scheduled_seconds_sum: excess as a share of scheduled run time.
+          Comparable across lines of different length. Can be negative.
+      - name: avg_excess_travel_seconds
+        data_type: double
+        description: Average seconds a stop-to-stop segment ran over schedule.
+      - name: median_excess_travel_seconds
+        data_type: double
+        description: Median seconds a stop-to-stop segment ran over schedule.
+      - name: p90_excess_travel_seconds
+        data_type: double
+        description: 90th percentile of stop-to-stop excess seconds.
+      - name: headway_observations
+        data_type: bigint
+        description: Departures with both an actual and a scheduled trunk headway above zero.
+      - name: long_gaps
+        data_type: bigint
+        description: Headway observations above var('long_gap_ratio') times scheduled.
+        data_tests:
+          - not_null
+      - name: long_gap_share
+        data_type: double
+        description: >-
+          Share of headway observations where the gap since the previous train was more than var('long_gap_ratio')
+          (default 1.5) times scheduled.
+        data_tests:
+          - is_share
+      - name: bunched_share
+        data_type: double
+        description: Share of headway observations under var('bunched_ratio') (default 0.5) times scheduled.
+        data_tests:
+          - is_share
+      - name: headway_adherence_share
+        data_type: double
+        description: Share of headway observations between the bunched and long-gap thresholds.
+        data_tests:
+          - is_share
+      - name: median_headway_ratio
+        data_type: double
+        description: Median of actual / scheduled trunk headway.
+  - name: mart_period_reliability
+    description: >-
+      Reliability by time of day. Grain: one row per GTFS route, day type and service period over the
+      loaded window.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: line_period_key
+        data_type: varchar
+        description: 'Surrogate key: route_id, day_type, service_period_id.'
+        data_tests:
+          - unique
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id: Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue.
+          Joins to dim_routes.'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_routes')
+                field: route_id
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday (holidays from the holidays seed).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
+      - name: service_period_id
+        data_type: varchar
+        description: MBTA service period (Service Delivery Policy). Joins to dim_service_periods.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_service_periods')
+                field: service_period_id
+      - name: service_days
+        data_type: bigint
+        description: Distinct service dates contributing to the row.
+      - name: trips_compared
+        data_type: bigint
+        description: Trips with at least one stop-to-stop segment that could be compared to schedule.
+      - name: trip_stop_events
+        data_type: bigint
+        description: Train arrivals at stops observed.
+      - name: travel_comparisons
+        data_type: bigint
+        description: Stop-to-stop segments with both an actual and a scheduled run time.
+      - name: avg_trip_excess_seconds
+        data_type: double
+        description: >-
+          Per train run: sum of stop-to-stop excess seconds over the trip's compared segments, averaged
+          over compared trips. Negative = faster than scheduled.
+      - name: late_trip_share
+        data_type: double
+        description: >-
+          Share of compared trips that ran more than var('late_trip_seconds') (default 300 s) over scheduled
+          run time.
+        data_tests:
+          - is_share
+      - name: avg_excess_travel_seconds
+        data_type: double
+        description: Average seconds a stop-to-stop segment ran over schedule.
+      - name: median_excess_travel_seconds
+        data_type: double
+        description: Median seconds a stop-to-stop segment ran over schedule.
+      - name: headway_observations
+        data_type: bigint
+        description: Departures with both an actual and a scheduled trunk headway above zero.
+      - name: long_gap_share
+        data_type: double
+        description: >-
+          Share of headway observations where the gap since the previous train was more than var('long_gap_ratio')
+          (default 1.5) times scheduled.
+        data_tests:
+          - is_share
+      - name: bunched_share
+        data_type: double
+        description: Share of headway observations under var('bunched_ratio') (default 0.5) times scheduled.
+        data_tests:
+          - is_share
+      - name: headway_adherence_share
+        data_type: double
+        description: Share of headway observations between the bunched and long-gap thresholds.
+        data_tests:
+          - is_share
+      - name: median_headway_seconds
+        data_type: double
+        description: Median actual trunk headway in seconds.
+      - name: median_scheduled_headway_seconds
+        data_type: double
+        description: Median scheduled trunk headway in seconds.
+  - name: mart_station_reliability
+    description: >-
+      Reliability and rider exposure by station and time of day. Grain: one row per station, trunk line,
+      day type and service period over the loaded window. Rider exposure comes from gated entries; has_rider_data
+      is false where the station has no fare gates.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: station_period_key
+        data_type: varchar
+        description: 'Surrogate key: station_id, line_id, day_type, service_period_id.'
+        data_tests:
+          - unique
+          - not_null
+      - name: station_id
+        data_type: varchar
+        description: GTFS parent station id (place-*). Joins to dim_stations.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_stations')
+                field: station_id
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green, Blue.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Red
+                  - Mattapan
+                  - Orange
+                  - Green
+                  - Blue
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday (holidays from the holidays seed).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
+      - name: service_period_id
+        data_type: varchar
+        description: MBTA service period (Service Delivery Policy). Joins to dim_service_periods.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_service_periods')
+                field: service_period_id
+      - name: service_days
+        data_type: bigint
+        description: Distinct service dates contributing to the row.
+      - name: trip_stop_events
+        data_type: bigint
+        description: Train arrivals at stops observed.
+      - name: travel_comparisons
+        data_type: bigint
+        description: Stop-to-stop segments with both an actual and a scheduled run time.
+      - name: avg_excess_travel_seconds
+        data_type: double
+        description: Average excess seconds on the segment into this station.
+      - name: headway_observations
+        data_type: bigint
+        description: Departures with both an actual and a scheduled trunk headway above zero.
+      - name: long_gap_share
+        data_type: double
+        description: >-
+          Share of headway observations where the gap since the previous train was more than var('long_gap_ratio')
+          (default 1.5) times scheduled.
+        data_tests:
+          - is_share
+      - name: headway_adherence_share
+        data_type: double
+        description: Share of headway observations between the bunched and long-gap thresholds.
+        data_tests:
+          - is_share
+      - name: median_headway_seconds
+        data_type: double
+        description: Median actual trunk headway in seconds.
+      - name: median_scheduled_headway_seconds
+        data_type: double
+        description: Median scheduled trunk headway in seconds.
+      - name: has_rider_data
+        data_type: boolean
+        description: True when gated-entry data exists for this station and line.
+      - name: avg_daily_gated_entries
+        data_type: double
+        description: Average daily fare-gate entries over the rider basis window.
+      - name: est_window_gated_entries
+        data_type: double
+        description: 'avg_daily_gated_entries x service_days: estimated entries in this cell over the
+          window.'
+      - name: est_window_entries_in_long_gaps
+        data_type: double
+        description: est_window_gated_entries x long_gap_share. An exposure index, not a count of people
+          who waited.
+      - name: rider_basis_start_date
+        data_type: date
+        description: First gated-entry date in the rider basis.
+      - name: rider_basis_end_date
+        data_type: date
+        description: Last gated-entry date in the rider basis.
+  - name: mart_station_overview
+    description: >-
+      Whole-window station summary for map shading. Grain: one row per station on a canonical subway pattern.
+      rider_weighted_* values weight each line/day-type/period cell by its estimated gated entries; map_*
+      columns fall back to event-weighted values where no rider data exists.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: station_key
+        data_type: varchar
+        description: Surrogate key (hash of station_id).
+        data_tests:
+          - unique
+          - not_null
+      - name: station_id
+        data_type: varchar
+        description: GTFS parent station id (place-*). Joins to dim_stations.
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_stations')
+                field: station_id
+      - name: station_name
+        data_type: varchar
+        description: Station name from GTFS stops.txt.
+        data_tests:
+          - not_null
+      - name: latitude
+        data_type: double
+        description: WGS84 latitude from GTFS stops.txt.
+        data_tests:
+          - not_null
+      - name: longitude
+        data_type: double
+        description: WGS84 longitude from GTFS stops.txt.
+        data_tests:
+          - not_null
+      - name: route_ids
+        data_type: varchar
+        description: Comma-separated GTFS route ids serving the station.
+        data_tests:
+          - not_null
+      - name: line_ids
+        data_type: varchar
+        description: Comma-separated trunk lines serving the station.
+      - name: trip_stop_events
+        data_type: bigint
+        description: Train arrivals at stops observed.
+      - name: headway_observations
+        data_type: bigint
+        description: Departures with both an actual and a scheduled trunk headway above zero.
+      - name: avg_excess_travel_seconds
+        data_type: double
+        description: Event-weighted average excess seconds on segments into the station.
+      - name: long_gap_share
+        data_type: double
+        description: Event-weighted long-gap share at the station.
+        data_tests:
+          - is_share
+      - name: has_rider_data
+        data_type: boolean
+        description: True when gated-entry data exists for this station and line.
+      - name: avg_daily_gated_entries
+        data_type: double
+        description: Estimated average daily gated entries (all lines, all day types).
+      - name: rider_weighted_excess_seconds
+        data_type: double
+        description: Excess seconds weighted by estimated gated entries per cell.
+      - name: rider_weighted_long_gap_share
+        data_type: double
+        description: Long-gap share weighted by estimated gated entries per cell.
+        data_tests:
+          - is_share
+      - name: map_excess_seconds
+        data_type: double
+        description: rider_weighted_excess_seconds, or avg_excess_travel_seconds where no rider data.
+          Use for shading.
+      - name: map_long_gap_share
+        data_type: double
+        description: rider_weighted_long_gap_share, or long_gap_share where no rider data. Use for shading.
+        data_tests:
+          - is_share
+      - name: est_daily_entries_in_long_gaps
+        data_type: double
+        description: >-
+          Average day (all day types, over the window): estimated gated entries made while trains at the
+          station were running a long gap.
+      - name: weekday_gated_entries
+        data_type: double
+        description: >-
+          Average weekday gated entries at the station (sum over lines and service periods of the weekday
+          cells).
+      - name: weekday_entries_in_long_gaps
+        data_type: double
+        description: >-
+          Average weekday: sum over lines and service periods of gated entries x long-gap share. Estimated
+          entries made during a long gap; an index, not a head count. Each entry is counted once (gated
+          entries are attributed to one line per gate).
+  - name: mart_line_shapes
+    description: >-
+      Track geometry per line branch and direction, for drawing the network. Grain: one row per branch,
+      direction and point on the GTFS shape of the canonical route pattern's representative trip (GTFS
+      version active on the latest loaded service date). Points rounded to 5 decimals with consecutive
+      duplicates removed.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: line_shape_point_key
+        data_type: varchar
+        description: Surrogate key (branch, direction, point_order).
+        data_tests:
+          - unique
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id: Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue.
+          Joins to dim_routes.'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_routes')
+                field: route_id
+      - name: branch_route_id
+        data_type: varchar
+        description: 'Branch: Red-A (Ashmont), Red-B (Braintree), Green-B..E; otherwise the route id.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Red-A
+                  - Red-B
+                  - Mattapan
+                  - Orange
+                  - Green-B
+                  - Green-C
+                  - Green-D
+                  - Green-E
+                  - Blue
+      - name: direction_id
+        data_type: integer
+        description: GTFS direction id, 0 or 1.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - 0
+                  - 1
+      - name: shape_id
+        data_type: varchar
+        description: GTFS shape id.
+        data_tests:
+          - not_null
+      - name: point_order
+        data_type: integer
+        description: Position along the shape, 1 = first point.
+        data_tests:
+          - not_null
+          - contiguous_sequence:
+              arguments:
+                partition_by:
+                  - branch_route_id
+                  - direction_id
+      - name: longitude
+        data_type: double
+        description: WGS84 longitude from GTFS shapes.txt.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: -71.3
+                max_value: -70.9
+      - name: latitude
+        data_type: double
+        description: WGS84 latitude from GTFS shapes.txt.
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 42.2
+                max_value: 42.5
+      - name: route_color_hex
+        data_type: varchar
+        description: 'Official MBTA route color from GTFS routes.route_color, as #RRGGBB.'
+        data_tests:
+          - not_null
+  - name: mart_station_daily_reliability
+    description: >-
+      Daily station counts for date-range filtering. Grain: one row per station, trunk line, service date
+      and service period. Additive counts only, so any date range can be re-aggregated (avg excess = excess_travel_seconds_sum
+      / travel_comparisons; long-gap share = long_gaps / headway_observations).
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: station_day_period_key
+        data_type: varchar
+        description: Surrogate key (station, line, service date, service period).
+        data_tests:
+          - unique
+          - not_null
+      - name: station_id
+        data_type: varchar
+        description: GTFS parent station id (place-*). Joins to dim_stations.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_stations')
+                field: station_id
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green, Blue.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Red
+                  - Mattapan
+                  - Orange
+                  - Green
+                  - Blue
+      - name: service_date
+        data_type: date
+        description: MBTA service date. Trips after midnight belong to the previous date.
+        data_tests:
+          - not_null
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD. Joins to dim_dates.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: service_period_id
+        data_type: varchar
+        description: MBTA service period (Service Delivery Policy). Joins to dim_service_periods.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_service_periods')
+                field: service_period_id
+      - name: trip_stop_events
+        data_type: bigint
+        description: Train arrivals at stops observed.
+        data_tests:
+          - not_null
+      - name: travel_comparisons
+        data_type: bigint
+        description: Stop-to-stop segments with both an actual and a scheduled run time.
+      - name: excess_travel_seconds_sum
+        data_type: bigint
+        description: Sum of stop-to-stop excess seconds (actual minus scheduled) on segments into the
+          station.
+      - name: headway_observations
+        data_type: bigint
+        description: Departures with both an actual and a scheduled trunk headway above zero.
+      - name: long_gaps
+        data_type: bigint
+        description: Headway observations above the long-gap threshold.
+      - name: bunched_headways
+        data_type: bigint
+        description: Headway observations below the bunched threshold.
+  - name: mart_data_coverage
+    description: >-
+      How much of the data can be compared to the schedule and weighted by riders. Grain: one row per
+      GTFS route over the loaded window. No scheduled travel = LAMP scheduled run time missing or not
+      above zero; no scheduled headway = scheduled trunk gap missing or zero. Ungated stations have no
+      gated-entry data (Green Line surface and Extension stops, Mattapan trolley stops).
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id: Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue.
+          Joins to dim_routes.'
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_routes')
+                field: route_id
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green, Blue.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - Red
+                  - Mattapan
+                  - Orange
+                  - Green
+                  - Blue
+      - name: trip_stop_events
+        data_type: bigint
+        description: Train arrivals at stops observed.
+        data_tests:
+          - not_null
+      - name: events_without_scheduled_travel
+        data_type: bigint
+        description: Trip-stop events with no scheduled run time from the previous stop (missing or <=
+          0).
+      - name: events_without_scheduled_headway
+        data_type: bigint
+        description: Trip-stop events with no scheduled trunk headway (missing or <= 0).
+      - name: events_without_any_schedule
+        data_type: bigint
+        description: Trip-stop events with neither a scheduled run time nor a scheduled headway.
+      - name: share_without_scheduled_travel
+        data_type: double
+        description: events_without_scheduled_travel / trip_stop_events.
+      - name: share_without_scheduled_headway
+        data_type: double
+        description: events_without_scheduled_headway / trip_stop_events.
+      - name: share_without_any_schedule
+        data_type: double
+        description: events_without_any_schedule / trip_stop_events.
+      - name: stations_served
+        data_type: bigint
+        description: Distinct parent stations with events on the route.
+      - name: stations_without_gated_entries
+        data_type: bigint
+        description: Of those, stations with no gated-entry data.
+      - name: events_at_ungated_stations
+        data_type: bigint
+        description: Trip-stop events at stations with no gated-entry data.
+      - name: share_events_at_ungated_stations
+        data_type: double
+        description: >-
+          events_at_ungated_stations / trip_stop_events. For Green Line routes this is the surface (ungated)
+          share.

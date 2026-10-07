@@ -1,0 +1,64 @@
+version: 2
+
+models:
+  - name: int_service_periods
+    description: >
+      Minute-of-day lookup to MBTA service periods. Grain: one row per minute 0-1439.
+      The unique test on minute_of_day plus the row-count test prove the seed covers the
+      whole clock day with no overlaps.
+    columns:
+      - name: minute_of_day
+        data_tests:
+          - unique
+          - not_null
+      - name: service_period_id
+        data_tests:
+          - not_null
+
+  - name: int_trip_stops__performance
+    description: >
+      Trip-stop rows with Boston local time, service period and schedule comparisons
+      (excess run time, headway ratio, long-gap / bunched flags). Grain: same as
+      stg_lamp__subway_trip_stops. Thresholds are project vars; see dbt_project.yml.
+    columns:
+      - name: trip_stop_event_key
+        data_tests:
+          - unique
+          - not_null
+      - name: service_period_id
+        data_tests:
+          - not_null
+
+  - name: int_line_stop_sequence
+    description: >
+      Stop order per branch and direction from canonical GTFS route patterns.
+      Grain: one row per branch, direction and stop position.
+    columns:
+      - name: line_stop_key
+        data_tests:
+          - unique
+          - not_null
+      - name: station_id
+        data_tests:
+          - not_null
+
+  - name: int_station_period_riders
+    description: >
+      Average daily gated entries. Grain: one row per station, trunk line, day type and
+      service period, over the rider basis window.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [station_id, line_id, day_type, service_period_id]
+
+  - name: int_gtfs_stations_as_of
+    description: >
+      Subway parent-station attributes in the GTFS version active on gtfs_as_of_date(), with
+      attributes_valid_from = the first archive date this exact set of attributes appeared
+      (gaps-and-islands over archive versions). Source for the snap_gtfs_stations snapshot.
+      Grain: one row per station.
+    columns:
+      - name: station_id
+        data_tests:
+          - unique
+          - not_null

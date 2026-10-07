@@ -1,0 +1,9 @@
+route_id,line_id,line_name,branch_name,display_name,display_order
+Red,Red,Red Line,,Red Line,1
+Mattapan,Mattapan,Mattapan Line,,Mattapan Trolley,2
+Orange,Orange,Orange Line,,Orange Line,3
+Green-B,Green,Green Line,B branch,Green Line B (Boston College),4
+Green-C,Green,Green Line,C branch,Green Line C (Cleveland Circle),5
+Green-D,Green,Green Line,D branch,Green Line D (Riverside),6
+Green-E,Green,Green Line,E branch,Green Line E (Heath Street),7
+Blue,Blue,Blue Line,,Blue Line,8

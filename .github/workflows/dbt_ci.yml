@@ -1,0 +1,65 @@
+name: dbt CI
+
+# Runs on every push and pull request against the committed sample in data/sample/
+# (two real service dates). No network calls to MBTA, no secrets.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  MBTA_DUCKDB_PATH: warehouse/ci.duckdb
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: dbt deps
+        run: dbt deps --profiles-dir .
+
+      - name: Lint SQL
+        run: sqlfluff lint models tests
+
+      - name: Load day 1 of the sample
+        run: |
+          python scripts/load_raw.py lamp --sample --end 2026-08-27
+          python scripts/load_raw.py gtfs --sample
+          python scripts/load_raw.py opendata --sample
+
+      - name: dbt build (full)
+        run: dbt build --profiles-dir . --full-refresh
+
+      - name: Load day 2 and build incrementally
+        run: |
+          python scripts/check_incremental.py save
+          python scripts/load_raw.py lamp --sample --start 2026-08-28
+          dbt build --profiles-dir .
+          python scripts/check_incremental.py compare
+
+      - name: Export board data and verify
+        run: |
+          python scripts/export_board.py
+          python scripts/verify_kpis.py
+
+      - name: Docs
+        run: dbt docs generate --profiles-dir . --static --target-path target_docs

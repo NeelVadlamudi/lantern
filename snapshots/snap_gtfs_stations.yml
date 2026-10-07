@@ -1,0 +1,18 @@
+snapshots:
+  - name: snap_gtfs_stations
+    description: >
+      SCD type 2 history of subway station attributes (name, coordinates, municipality,
+      wheelchair boarding) from the GTFS archive. Timestamp strategy on attributes_valid_from,
+      so dbt_valid_from is the GTFS date the attributes took effect, not the run time.
+      A normal `dbt build` adds the latest version. scripts/replay_station_snapshot.py rebuilds
+      the history by replaying past GTFS as-of dates in order.
+    relation: ref('int_gtfs_stations_as_of')
+    config:
+      unique_key: station_id
+      strategy: timestamp
+      updated_at: attributes_valid_from
+      hard_deletes: invalidate
+    columns:
+      - name: station_id
+        data_tests:
+          - not_null

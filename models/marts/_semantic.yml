@@ -1,0 +1,177 @@
+version: 2
+
+semantic_models:
+  - name: trip_stop_events
+    description: Train arrivals at stops (fct_trip_stop_events).
+    model: ref('fct_trip_stop_events')
+    defaults:
+      agg_time_dimension: service_date
+    entities:
+      - name: trip_stop_event
+        type: primary
+        expr: trip_stop_event_key
+      - name: trip
+        type: foreign
+        expr: trip_key
+      - name: route
+        type: foreign
+        expr: route_id
+      - name: station
+        type: foreign
+        expr: station_id
+    dimensions:
+      - name: service_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: service_period_id
+        type: categorical
+      - name: line_id
+        type: categorical
+      - name: direction_id
+        type: categorical
+    measures:
+      - name: travel_comparisons
+        description: Stop-to-stop segments compared to schedule.
+        agg: sum
+        expr: "case when has_travel_comparison then 1 else 0 end"
+      - name: excess_travel_seconds_total
+        description: Sum of stop-to-stop excess seconds.
+        agg: sum
+        expr: excess_travel_seconds
+      - name: headway_observations
+        description: Departures with an actual and scheduled headway.
+        agg: sum
+        expr: "case when has_headway_comparison then 1 else 0 end"
+      - name: long_gaps
+        description: Headways longer than the long-gap threshold.
+        agg: sum
+        expr: "case when is_long_gap then 1 else 0 end"
+      - name: adherent_headways
+        description: Headways between the bunched and long-gap thresholds.
+        agg: sum
+        expr: "case when is_headway_adherent then 1 else 0 end"
+
+  - name: trips
+    description: Train runs (fct_trips).
+    model: ref('fct_trips')
+    defaults:
+      agg_time_dimension: service_date
+    entities:
+      - name: trip
+        type: primary
+        expr: trip_key
+      - name: route
+        type: foreign
+        expr: route_id
+    dimensions:
+      - name: service_date
+        type: time
+        type_params:
+          time_granularity: day
+      - name: start_service_period_id
+        type: categorical
+      - name: is_added_trip
+        type: categorical
+    measures:
+      - name: trip_count
+        description: Train runs observed.
+        agg: count
+        expr: trip_key
+      - name: trips_compared
+        description: Train runs with at least one segment compared to schedule.
+        agg: sum
+        expr: "case when compared_segments > 0 then 1 else 0 end"
+      - name: trip_excess_seconds_total
+        description: Sum of trip excess seconds over compared trips.
+        agg: sum
+        expr: "case when compared_segments > 0 then trip_excess_seconds end"
+      - name: late_trips
+        description: Trips more than the late threshold over scheduled run time.
+        agg: sum
+        expr: "case when is_late_trip then 1 else 0 end"
+
+metrics:
+  - name: trips
+    label: Trips
+    description: Train runs observed.
+    type: simple
+    type_params:
+      measure: trip_count
+
+  - name: trips_compared
+    label: Trips compared
+    type: simple
+    type_params:
+      measure: trips_compared
+
+  - name: trip_excess_seconds_total
+    label: Trip excess seconds (total)
+    type: simple
+    type_params:
+      measure: trip_excess_seconds_total
+
+  - name: late_trips
+    label: Late trips
+    type: simple
+    type_params:
+      measure: late_trips
+
+  - name: headway_observations
+    label: Headway observations
+    type: simple
+    type_params:
+      measure: headway_observations
+
+  - name: long_gaps
+    label: Long gaps
+    type: simple
+    type_params:
+      measure: long_gaps
+
+  - name: adherent_headways
+    label: Adherent headways
+    type: simple
+    type_params:
+      measure: adherent_headways
+
+  - name: excess_seconds_per_trip
+    label: Excess seconds per trip
+    description: Average seconds a trip ran over its scheduled run time.
+    type: ratio
+    type_params:
+      numerator: trip_excess_seconds_total
+      denominator: trips_compared
+
+  - name: excess_travel_minutes
+    label: Excess travel minutes per trip
+    description: Average minutes a trip ran over its scheduled run time. Negative = faster than scheduled.
+    type: derived
+    type_params:
+      expr: excess_seconds_per_trip / 60
+      metrics:
+        - name: excess_seconds_per_trip
+
+  - name: late_trip_share
+    label: Share of trips 5+ minutes over schedule
+    description: Late trips / compared trips (threshold is var('late_trip_seconds')).
+    type: ratio
+    type_params:
+      numerator: late_trips
+      denominator: trips_compared
+
+  - name: long_gap_share
+    label: Long-gap share
+    description: Share of headways more than 1.5x scheduled (var('long_gap_ratio')).
+    type: ratio
+    type_params:
+      numerator: long_gaps
+      denominator: headway_observations
+
+  - name: headway_adherence
+    label: Headway adherence
+    description: Share of headways between 0.5x and 1.5x scheduled.
+    type: ratio
+    type_params:
+      numerator: adherent_headways
+      denominator: headway_observations

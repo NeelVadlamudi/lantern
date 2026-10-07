@@ -1,0 +1,94 @@
+version: 2
+
+sources:
+  - name: lamp
+    description: >
+      MBTA LAMP (Lightweight Application for Measuring Performance) public exports, landed
+      unchanged by scripts/load_raw.py. https://performancedata.mbta.com
+    schema: raw
+    tables:
+      - name: lamp_subway_on_time
+        description: >
+          Subway on-time performance, one Parquet file per service date. One row per
+          trip-stop pair observed in real time (GTFS-RT vehicle positions), with LAMP-calculated
+          travel, dwell and headway times and the matching scheduled values from GTFS.
+          Field definitions: https://github.com/mbta/lamp/blob/main/Data_Dictionary.md
+        loaded_at_field: "strptime(cast(service_date as varchar), '%Y%m%d')"
+        config:
+          freshness:
+            warn_after: {count: 2, period: day}
+            error_after: {count: 4, period: day}
+        columns:
+          - name: service_date
+            description: Service date as an integer (YYYYMMDD). A service date runs past midnight.
+            data_tests:
+              - not_null
+          - name: trip_id
+            description: GTFS-RT trip id. Trips not in the schedule start with ADDED-.
+            data_tests:
+              - not_null
+          - name: stop_id
+            description: Platform-level GTFS stop id.
+            data_tests:
+              - not_null
+          - name: parent_station
+            description: GTFS parent station id (place-*).
+          - name: route_id
+            description: GTFS route id (Red, Orange, Blue, Green-B..E, Mattapan).
+          - name: travel_time_seconds
+            description: Seconds from the previous stop on the trip to this stop.
+          - name: scheduled_travel_time
+            description: Planned seconds from the previous stop, from GTFS stop_times.
+          - name: headway_trunk_seconds
+            description: Seconds since the previous train departed this parent station on the same trunk line.
+          - name: scheduled_headway_trunk
+            description: Planned trunk headway at this parent station.
+          - name: _loaded_at
+            description: UTC time the row was written by the loader.
+
+  - name: gtfs
+    description: >
+      LAMP compressed GTFS archive. Every GTFS schedule the MBTA has published, one Parquet file
+      per year and GTFS file. gtfs_active_date / gtfs_end_date (YYYYMMDD) give the service dates
+      each record applied to. https://performancedata.mbta.com
+    schema: raw
+    tables:
+      - name: gtfs_stops
+        description: GTFS stops.txt rows, all versions for the loaded years.
+      - name: gtfs_routes
+        description: GTFS routes.txt rows, all versions for the loaded years.
+      - name: gtfs_route_patterns
+        description: MBTA GTFS extension route_patterns.txt, all versions for the loaded years.
+      - name: gtfs_stop_times
+        description: >
+          GTFS stop_times.txt, filtered by the loader to the representative trip of each subway
+          route pattern (used only for stop order).
+      - name: gtfs_trips
+        description: GTFS trips.txt, filtered by the loader to representative trips of subway route patterns.
+      - name: gtfs_shapes
+        description: GTFS shapes.txt, filtered by the loader to the shapes of those representative trips.
+
+  - name: mbta_open_data
+    description: >
+      MBTA Open Data Portal (ArcGIS Hub) CSV downloads, landed as text.
+      https://mbta-massdot.opendata.arcgis.com
+    schema: raw
+    tables:
+      - name: mbta_gated_station_entries
+        description: >
+          Fare gate entries by station, line and 30-minute period per service date
+          (hub item 001c177f07594e7c99f193dde32284c9). Counts can be fractional: the MBTA
+          splits entries at shared stations across lines.
+        loaded_at_field: _loaded_at
+        columns:
+          - name: service_date
+          - name: time_period
+            description: "Start of the 30-minute bin, e.g. \"(07:30:00)\"."
+          - name: stop_id
+            description: Parent station id (place-*).
+          - name: route_or_line
+          - name: gated_entries
+      - name: mbta_monthly_ridership
+        description: >
+          Monthly ridership by mode and line as reported to the National Transit Database
+          (hub item 2048258a18354256a650d41f8fe4532c).

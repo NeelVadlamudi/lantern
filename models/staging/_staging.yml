@@ -1,0 +1,154 @@
+version: 2
+
+models:
+  - name: stg_lamp__subway_trip_stops
+    description: >
+      LAMP subway trip-stop rows, renamed and typed. Grain: one row per service date, trip,
+      route, vehicle and stop. Rows repeated at that grain are deduplicated (latest load wins).
+    columns:
+      - name: trip_stop_event_key
+        description: Surrogate key of service_date, trip_id, route_id, vehicle_label, stop_id.
+        data_tests:
+          - unique
+          - not_null
+      - name: service_date
+        data_tests:
+          - not_null
+      - name: route_id
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+      - name: branch_route_id
+        description: LAMP branch id (Red-A, Red-B, Green-B..E), falling back to route_id.
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [Red, Red-A, Red-B, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+              config:
+                severity: warn
+      - name: line_id
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [Red, Mattapan, Orange, Green, Blue]
+      - name: direction_id
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: station_id
+        data_tests:
+          - not_null
+      - name: stop_id
+        data_tests:
+          - not_null
+      - name: scheduled_headway_trunk_seconds
+        description: Scheduled trunk headway. Zero values are a known source issue (see README findings).
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 1
+                where: scheduled_headway_trunk_seconds is not null
+              config:
+                severity: warn
+
+  - name: stg_gtfs__stops
+    description: >
+      GTFS stops, all archive versions. Grain: one row per stop id and archive validity range.
+      LAMP stores validity per record, so a stop can have several rows starting the same day
+      with different end dates.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [stop_id, valid_from_date, valid_to_date]
+    columns:
+      - name: stop_id
+        data_tests:
+          - not_null
+
+  - name: stg_gtfs__routes
+    description: "GTFS routes, all archive versions. Grain: one row per route id and version."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [route_id, valid_from_date, valid_to_date]
+
+  - name: stg_gtfs__route_patterns
+    description: "GTFS route patterns, all archive versions. Grain: one row per pattern and version."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [route_pattern_id, valid_from_date, valid_to_date]
+
+  - name: stg_gtfs__stop_times
+    description: >
+      GTFS stop_times for representative trips of subway route patterns.
+      Grain: one row per trip, stop sequence and version.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [trip_id, stop_sequence, valid_from_date, valid_to_date]
+
+  - name: stg_gtfs__trips
+    description: >
+      GTFS trips for representative trips of subway route patterns.
+      Grain: one row per trip and archive validity range.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [trip_id, valid_from_date, valid_to_date]
+
+  - name: stg_gtfs__shapes
+    description: >
+      GTFS shape points for those trips. Grain: one row per shape, point sequence and archive
+      validity range.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [shape_id, shape_point_sequence, valid_from_date, valid_to_date]
+
+  - name: stg_mbta__gated_entries
+    description: "Fare-gate entries. Grain: one row per service date, station, line and 30-minute bin."
+    columns:
+      - name: service_date
+        data_tests:
+          - not_null
+      - name: station_id
+        description: >
+          Parent station id. A few source rows have a blank stop_id (12 Longwood rows in the
+          current file); they can't be joined to a station and are dropped in
+          int_station_period_riders. The warn test keeps the count visible.
+        data_tests:
+          - not_null:
+              config:
+                severity: warn
+      - name: bin_start_minute
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1410
+      - name: gated_entries
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+
+  - name: stg_mbta__monthly_ridership
+    description: "Monthly ridership by mode and line (NTD). Grain: one row per month, day type and mode/line."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [month_start_date, day_type, route_or_line]
+    columns:
+      - name: day_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [weekday, saturday, sunday, total]

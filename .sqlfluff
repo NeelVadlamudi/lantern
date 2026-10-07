@@ -1,0 +1,44 @@
+[sqlfluff]
+templater = dbt
+dialect = duckdb
+max_line_length = 120
+# ST06 (column order) fights readable SELECTs that group keys, measures and flags.
+# AM04 (no SELECT *) is fine for single-CTE passthroughs like `select * from {{ ref(...) }}`.
+exclude_rules = ST06, AM04
+large_file_skip_byte_limit = 0
+
+[sqlfluff:templater:dbt]
+project_dir = .
+profiles_dir = .
+
+[sqlfluff:indentation]
+indent_unit = space
+tab_space_size = 4
+implicit_indents = allow
+
+[sqlfluff:rules:capitalisation.keywords]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.functions]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.literals]
+capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.identifiers]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:capitalisation.types]
+extended_capitalisation_policy = lower
+
+[sqlfluff:rules:aliasing.table]
+aliasing = explicit
+
+[sqlfluff:rules:aliasing.column]
+aliasing = explicit
+
+[sqlfluff:rules:ambiguous.column_references]
+group_by_and_order_by_style = consistent
+
+[sqlfluff:rules:convention.casting_style]
+preferred_type_casting_style = cast

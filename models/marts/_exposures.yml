@@ -1,0 +1,24 @@
+version: 2
+
+exposures:
+  - name: reliability_board
+    label: Subway reliability board
+    type: application
+    maturity: medium
+    url: ./index.html
+    description: >
+      Interactive board served from GitHub Pages. It queries the Parquet files in out/ with
+      DuckDB in the browser, reads out/board_data.json for tiles, glossary and build stats, and
+      overlays live vehicle positions from the MBTA V3 API (outside dbt).
+    depends_on:
+      - ref('board_line_daily')
+      - ref('board_line_periods')
+      - ref('board_station_periods')
+      - ref('board_station_daily')
+      - ref('board_map_stations')
+      - ref('board_line_stops')
+      - ref('board_line_shapes')
+      - ref('board_service_periods')
+      - ref('board_routes')
+    owner:
+      name: Neel Vadlamudi

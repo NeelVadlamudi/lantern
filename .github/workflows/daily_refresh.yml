@@ -1,0 +1,121 @@
+name: Daily refresh
+
+# Pulls the newest MBTA service date, rebuilds, and publishes docs/ and out/ to GitHub Pages.
+# docs/ becomes the site root (board at ./index.html, dbt docs at ./dbt/index.html), out/ is ./out/.
+# Nothing is committed back to the repository: the site is deployed as a Pages artifact.
+# The DuckDB file is carried between runs with actions/cache, so the incremental fact only
+# processes new service dates. On a cache miss the loader falls back to its default window
+# (the last 90 complete service dates) and the station snapshot history is replayed.
+
+on:
+  schedule:
+    - cron: "30 11 * * *"  # 07:30 Boston (EDT) / 06:30 (EST); LAMP posts the previous day overnight
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: daily-refresh
+  cancel-in-progress: false
+
+env:
+  MBTA_DUCKDB_PATH: warehouse/mbta.duckdb
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install
+        run: pip install -r requirements.txt
+
+      - name: Restore warehouse
+        id: warehouse
+        uses: actions/cache/restore@v6
+        with:
+          path: warehouse/mbta.duckdb
+          key: mbta-duckdb-v1-${{ github.run_id }}
+          restore-keys: mbta-duckdb-v1-
+
+      - name: dbt deps
+        run: dbt deps --profiles-dir .
+
+      - name: Load raw data
+        id: load
+        run: |
+          if [ -f warehouse/mbta.duckdb ]; then
+            echo "Warehouse restored from cache; pulling new service dates only"
+            python scripts/load_raw.py lamp --since-last
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No cached warehouse; loading the default window"
+            python scripts/load_raw.py lamp
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+          fi
+          python scripts/load_raw.py gtfs
+          python scripts/load_raw.py opendata
+
+      - name: Source freshness
+        run: dbt source freshness --profiles-dir .
+
+      - name: dbt build
+        run: dbt build --profiles-dir .
+
+      - name: Replay station snapshot history (new warehouse only)
+        if: steps.load.outputs.fresh == 'true'
+        run: python scripts/replay_station_snapshot.py
+
+      - name: Export board data and verify
+        run: |
+          python scripts/export_board.py
+          python scripts/verify_kpis.py
+
+      - name: Save warehouse
+        if: success()
+        uses: actions/cache/save@v6
+        with:
+          path: warehouse/mbta.duckdb
+          key: mbta-duckdb-v1-${{ github.run_id }}
+
+      - name: Docs
+        run: |
+          dbt docs generate --profiles-dir . --static --target-path target_docs
+          mkdir -p docs/dbt
+          cp target_docs/static_index.html docs/dbt/index.html
+
+      # Site layout: docs/ is the Pages root (the board is docs/index.html, dbt docs at
+      # ./dbt/index.html) and the exported data is served at ./out/.
+      - name: Assemble site
+        run: |
+          mkdir -p _site
+          cp -r docs/. _site/
+          rm -f _site/.gitkeep
+          cp -r out _site/out
+          rm -f _site/out/.gitkeep
+          if [ ! -f _site/index.html ]; then cp site/index.html _site/index.html; fi
+
+      - uses: actions/configure-pages@v6
+
+      - uses: actions/upload-pages-artifact@v5
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v5

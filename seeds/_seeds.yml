@@ -1,0 +1,45 @@
+version: 2
+
+seeds:
+  - name: service_periods
+    description: >
+      MBTA weekday time periods, MBTA Service Delivery Policy (December 2025), Table 1.
+      Minutes after midnight, inclusive. Night (00:00-02:59) is the tail of the previous service day.
+    config:
+      column_types:
+        start_minute: integer
+        end_minute: integer
+        sort_order: integer
+    columns:
+      - name: service_period_id
+        data_tests:
+          - unique
+          - not_null
+  - name: line_display
+    description: Display names and chart order for the eight subway routes.
+    columns:
+      - name: route_id
+        data_tests:
+          - unique
+          - not_null
+  - name: red_line_branches
+    description: Red Line branch ids as LAMP uses them, keyed by the branch terminal station.
+    columns:
+      - name: branch_route_id
+        data_tests:
+          - unique
+  - name: holidays
+    description: 2026 federal and Massachusetts holidays. Used to split out holiday service in day_type.
+    config:
+      column_types:
+        holiday_date: date
+    columns:
+      - name: holiday_date
+        data_tests:
+          - unique
+  - name: gated_entry_lines
+    description: Maps the gated-entry feed's route_or_line labels to trunk line ids (Silver Line excluded).
+    columns:
+      - name: route_or_line
+        data_tests:
+          - unique

@@ -1,0 +1,57 @@
+name: mbta_reliability
+version: "0.1.0"
+config-version: 2
+profile: mbta_reliability
+
+model-paths: ["models"]
+seed-paths: ["seeds"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+analysis-paths: ["analyses"]
+target-path: "target"
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # Thresholds used by the intermediate and mart layers. Changing one here changes every model.
+  long_gap_ratio: 1.5          # actual headway / scheduled headway above this = long gap
+  bunched_ratio: 0.5           # actual headway / scheduled headway below this = bunched
+  late_trip_seconds: 300       # a trip running this much over its scheduled run time counts as late
+  travel_outlier_seconds: 1800 # a single stop-to-stop travel time above this is treated as a data error
+  incremental_lookback_days: 3 # LAMP republishes recent days; reprocess this many trailing days
+  rider_basis_days: 56         # days of gated entries used to estimate riders exposed
+  # GTFS "as of" date (YYYYMMDD) for the station snapshot. Empty = latest loaded service date.
+  gtfs_as_of: ""
+
+models:
+  mbta_reliability:
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+      +access: protected
+    marts:
+      +materialized: table
+      +schema: marts
+      +access: public
+    exports:
+      # Parquet files in out/ for the board (DuckDB-WASM). Each also registers a view in
+      # the `exports` schema so tests can query it.
+      +schema: exports
+      +materialized: external
+      +format: parquet
+      +options:
+        compression: zstd
+
+seeds:
+  mbta_reliability:
+    +schema: reference
+
+snapshots:
+  mbta_reliability:
+    +schema: snapshots
+
+flags:
+  require_generic_test_arguments_property: true

@@ -1,0 +1,10 @@
+service_period_id,service_period_name,start_minute,end_minute,sort_order
+sunrise,Sunrise,180,359,1
+early_am,Early AM,360,419,2
+am_peak,AM Peak,420,539,3
+midday_base,Midday Base,540,809,4
+midday_school,Midday School,810,959,5
+pm_peak,PM Peak,960,1109,6
+evening,Evening,1110,1319,7
+late_evening,Late Evening,1320,1439,8
+night,Night,0,179,9

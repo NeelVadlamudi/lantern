@@ -1,0 +1,17 @@
+.venv/
+__pycache__/
+target/
+dbt_packages/
+logs/
+warehouse/*
+!warehouse/.gitkeep
+data/raw/
+out/*.tmp
+.user.yml
+.DS_Store
+target_docs/
+_site/
+# generated on every build; published by the daily workflow, not committed
+out/*.parquet
+out/*.json
+docs/dbt/
