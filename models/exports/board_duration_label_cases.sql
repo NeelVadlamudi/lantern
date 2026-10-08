@@ -36,9 +36,20 @@ largest_week as (
 
 top_segment as (
 
-    select avg_weekday_rider_seconds_lost
+    select avg_weekday_positive_excess_seconds
     from {{ ref('mart_segment_reliability') }}
     where loss_rank = 1
+
+),
+
+train_delay as (
+
+    select
+        avg_daily_positive_excess_seconds,
+        avg_daily_net_excess_seconds,
+        positive_excess_seconds_per_run
+    from {{ ref('mart_train_delay_summary') }}
+    where day_basis = 'weekday'
 
 ),
 
@@ -75,9 +86,30 @@ real_values as (
     select
         105 as sort_order,
         'mart' as case_source,
-        'top segment, average weekday rider time lost' as case_name,
-        avg_weekday_rider_seconds_lost as seconds
+        'top segment, average weekday train delay' as case_name,
+        avg_weekday_positive_excess_seconds as seconds
     from top_segment
+    union all
+    select
+        106 as sort_order,
+        'mart' as case_source,
+        'average weekday train delay' as case_name,
+        avg_daily_positive_excess_seconds as seconds
+    from train_delay
+    union all
+    select
+        107 as sort_order,
+        'mart' as case_source,
+        'average weekday train delay, net' as case_name,
+        avg_daily_net_excess_seconds as seconds
+    from train_delay
+    union all
+    select
+        108 as sort_order,
+        'mart' as case_source,
+        'weekday train delay per run' as case_name,
+        positive_excess_seconds_per_run as seconds
+    from train_delay
 
 ),
 

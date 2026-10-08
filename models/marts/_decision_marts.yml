@@ -53,6 +53,18 @@ models:
       - name: from_stop_order
         data_type: integer
         description: Position of the start station on the pattern (for ordering).
+      - name: is_terminal_departure
+        data_type: boolean
+        description: 'True when the start station is the first stop of the canonical pattern of the branch (for
+          a segment: of at least one branch that runs over it).'
+        data_tests:
+          - not_null
+      - name: is_terminal_arrival
+        data_type: boolean
+        description: 'True when the end station is the last stop of the canonical pattern of the branch (for a segment:
+          of at least one branch that runs over it).'
+        data_tests:
+          - not_null
       - name: geometry
         data_type: double[][]
         description: Track geometry as a list of [lon, lat] points (WGS84).
@@ -80,8 +92,8 @@ models:
               - from_station_id
               - to_station_id
   - name: fct_segment_traversals
-    description: 'One row per train run over a segment compared to the schedule. Grain: trip-stop event at the segment
-      end whose previous observed stop was the segment start.'
+    description: One row per observed train run over a segment, compared to the schedule or not (run_comparison_status).
+      Run times, the terminal split and the excess come from int_train_runs.
     config:
       contract:
         enforced: true
@@ -161,19 +173,220 @@ models:
         description: Station the segment ends at (GTFS parent station, place-*).
         data_tests:
           - not_null
+      - name: run_comparison_status
+        data_type: varchar
+        description: '''compared'', ''actual_missing'', ''scheduled_missing'', ''actual_not_positive'' or ''scheduled_not_positive''.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - compared
+                  - actual_missing
+                  - scheduled_missing
+                  - actual_not_positive
+                  - scheduled_not_positive
+      - name: is_compared
+        data_type: boolean
+        description: run_comparison_status = 'compared'.
+        data_tests:
+          - not_null
+      - name: is_long_run
+        data_type: boolean
+        description: Compared and run_seconds over travel_outlier_seconds (30 min). Kept and flagged.
+        data_tests:
+          - not_null
       - name: actual_run_seconds
         data_type: bigint
-        description: Actual run time over the segment, seconds.
+        description: 'Recorded run time: arrival here minus arrival at the start station (first observed segment:
+          minus departure from it).'
+      - name: run_seconds
+        data_type: bigint
+        description: 'actual_run_seconds minus terminal_hold_in_actual_seconds: the time compared with the schedule.'
       - name: scheduled_run_seconds
         data_type: bigint
-        description: Scheduled run time over the segment, seconds.
-      - name: excess_travel_seconds
+        description: Scheduled arrival here minus scheduled departure at the start station.
+      - name: net_excess_seconds
         data_type: bigint
-        description: actual_run_seconds - scheduled_run_seconds.
+        description: Run minus scheduled seconds (compared runs). Signed, not clamped.
+      - name: positive_excess_seconds
+        data_type: bigint
+        description: 'max(run - scheduled, 0) seconds (compared runs): late time only.'
+      - name: is_first_observed_segment
+        data_type: boolean
+        description: True for the run out of the trip's first observed stop.
+      - name: arrived_start_at
+        data_type: timestamp
+        description: Arrival at the start station (Boston local, LAMP stop time).
+      - name: departed_start_at
+        data_type: timestamp
+        description: Departure from the start station (Boston local, LAMP move time at the end station).
+      - name: arrived_at
+        data_type: timestamp
+        description: Arrival at the end station (Boston local).
+      - name: dwell_at_start_seconds
+        data_type: bigint
+        description: departed_start_at - arrived_start_at.
+      - name: in_motion_seconds
+        data_type: bigint
+        description: arrived_at - departed_start_at.
+      - name: recorded_span_seconds
+        data_type: bigint
+        description: arrived_at - arrived_start_at (= dwell + in motion).
+      - name: is_terminal_departure
+        data_type: boolean
+        description: 'True when the start station is the first stop of the canonical pattern of the branch (for
+          a segment: of at least one branch that runs over it).'
+        data_tests:
+          - not_null
+      - name: is_terminal_arrival
+        data_type: boolean
+        description: 'True when the end station is the last stop of the canonical pattern of the branch (for a segment:
+          of at least one branch that runs over it).'
+        data_tests:
+          - not_null
+      - name: terminal_time_split
+        data_type: varchar
+        description: '''departure_hold_split'' (terminal hold split out from recorded times), ''departure_hold_not_recorded''
+          (a timestamp is missing), ''arrival_not_split'' (LAMP has no timestamp for holding outside a terminal,
+          so it stays in the run) or ''not_terminal''.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - departure_hold_split
+                  - departure_hold_not_recorded
+                  - arrival_not_split
+                  - not_terminal
+      - name: terminal_hold_seconds
+        data_type: bigint
+        description: 'Terminal departures: dwell_at_start_seconds, the recorded time on the terminal platform before
+          leaving. Null otherwise.'
+      - name: terminal_hold_in_actual_seconds
+        data_type: bigint
+        description: The terminal hold when it is inside actual_run_seconds (not the first observed segment); split
+          out of run_seconds.
+  - name: fct_suspension_gaps
+    description: 'Every gap over wait_max_headway_seconds (1 hour) between trains at a platform, checked against
+      the recorded departures. Grain: one row per departure that ended such a gap.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: trip_stop_event_key
+        data_type: varchar
+        description: Key of the departure that ended the gap. Joins to fct_trip_stop_events.
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('fct_trip_stop_events')
+                field: trip_stop_event_key
+      - name: service_date
+        data_type: date
+        description: MBTA service date. Trips after midnight belong to the previous date.
+        data_tests:
+          - not_null
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD. Joins to dim_dates.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
+      - name: service_period_id
+        data_type: varchar
+        description: MBTA service period. Joins to dim_service_periods.
+        data_tests:
+          - not_null
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green or Blue (Green branches share one line).'
+        data_tests:
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: GTFS route id of the branch whose shape draws the segment.
+      - name: direction_id
+        data_type: integer
+        description: 'GTFS direction: 0 or 1.'
+        data_tests:
+          - not_null
+      - name: station_id
+        data_type: varchar
+        description: GTFS parent station id (place-*). Joins to dim_stations.
+        data_tests:
+          - not_null
+      - name: stop_id
+        data_type: varchar
+        description: Platform (GTFS stop id).
+      - name: gap_seconds
+        data_type: bigint
+        description: LAMP's trunk headway for the departure (actual gap), seconds.
+        data_tests:
+          - not_null
+      - name: scheduled_gap_seconds
+        data_type: bigint
+        description: Scheduled gap, seconds.
+      - name: gap_start_at
+        data_type: timestamp
+        description: 'departed_at - gap_seconds: the previous departure LAMP counted (Boston local).'
+      - name: departed_at
+        data_type: timestamp
+        description: When this train left the platform (LAMP move time at its next stop, Boston local). Null when
+          not recorded.
+      - name: gap_start_service_date
+        data_type: date
+        description: Service date of the departure recorded exactly at gap_start_at; null when it is not in the
+          files.
+      - name: recorded_departures_in_gap
+        data_type: bigint
+        description: Departures recorded at the same platform strictly inside the gap.
+      - name: longest_recorded_piece_seconds
+        data_type: bigint
+        description: Longest piece of the gap between recorded departures (the gap itself when none is inside).
+      - name: recorded_gap_squared_sum
+        data_type: double
+        description: Sum of the squared pieces between gap_start_at, the recorded departures inside and departed_at
+          (gap_seconds^2 when none).
+      - name: gap_kind
+        data_type: varchar
+        description: spans_service_day_boundary, departure_recorded_inside, departure_not_recorded or no_departure_recorded_inside
+          (rule in the model header).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - spans_service_day_boundary
+                  - departure_recorded_inside
+                  - departure_not_recorded
+                  - no_departure_recorded_inside
+      - name: is_passenger_wait
+        data_type: boolean
+        description: False only for 'spans_service_day_boundary'.
+        data_tests:
+          - not_null
   - name: mart_station_rider_time_lost
-    description: 'Estimated rider time lost beyond the schedule. Grain: station, line, service date and service
-      period. Wait = sum(h^2)/(2 sum(h)) actual minus scheduled; ride = average excess on segments starting here;
-      weighted by gated entries. Not clamped at 0.'
+    description: 'Estimated rider time lost beyond the schedule (an estimate: people entering stations, riders assumed
+      to arrive at random). Grain: station, line, service date and service period. Wait without and with the gaps
+      over 1 hour; not clamped at 0.'
     config:
       contract:
         enforced: true
@@ -228,9 +441,6 @@ models:
       - name: headway_observations
         data_type: bigint
         description: Departures with a headway comparison and a gap of at most wait_max_headway_seconds.
-      - name: suspension_gaps
-        data_type: bigint
-        description: Gaps longer than wait_max_headway_seconds, left out of the wait sums.
       - name: actual_headway_seconds_sum
         data_type: double
         description: Sum of actual gaps h, seconds. Additive.
@@ -243,6 +453,39 @@ models:
       - name: scheduled_headway_squared_sum
         data_type: double
         description: Sum of squared scheduled gaps. Additive.
+      - name: suspension_gap_count
+        data_type: bigint
+        description: Gaps over wait_max_headway_seconds (1 hour). Counted here, not in the ordinary wait sums.
+        data_tests:
+          - not_null
+      - name: suspension_gap_seconds
+        data_type: double
+        description: Sum of those gaps (actual), seconds.
+      - name: suspension_gap_scheduled_seconds
+        data_type: double
+        description: Sum of the scheduled gaps of those departures, seconds.
+      - name: waited_gap_count
+        data_type: bigint
+        description: Gaps over 1 hour kept as passenger waits (fct_suspension_gaps.is_passenger_wait).
+      - name: waited_gap_seconds
+        data_type: double
+        description: Sum of those gaps, seconds.
+      - name: waited_gap_squared_sum
+        data_type: double
+        description: Sum of recorded_gap_squared_sum over the waited gaps.
+      - name: waited_gap_scheduled_seconds
+        data_type: double
+        description: Sum of scheduled gaps of the waited gaps.
+      - name: waited_gap_scheduled_squared_sum
+        data_type: double
+        description: Sum of squared scheduled gaps of the waited gaps.
+      - name: non_wait_gap_count
+        data_type: bigint
+        description: Gaps over 1 hour that the recorded data shows were not passenger waits (overnight break). Left
+          out of wait with gaps.
+      - name: non_wait_gap_seconds
+        data_type: double
+        description: Sum of those gaps, seconds.
       - name: actual_expected_wait_seconds
         data_type: double
         description: 'Expected wait for a rider arriving at random with the actual gaps: sum(h^2) / (2 sum(h)).'
@@ -252,12 +495,21 @@ models:
       - name: excess_wait_seconds
         data_type: double
         description: actual_expected_wait_seconds - scheduled_expected_wait_seconds. Signed, not clamped.
+      - name: actual_expected_wait_with_gaps_seconds
+        data_type: double
+        description: Expected wait with the actual gaps, the waited gaps over 1 hour included (their recorded pieces).
+      - name: scheduled_expected_wait_with_gaps_seconds
+        data_type: double
+        description: Same with the scheduled gaps.
+      - name: excess_wait_with_gaps_seconds
+        data_type: double
+        description: actual_expected_wait_with_gaps_seconds - scheduled_expected_wait_with_gaps_seconds. Signed.
       - name: segment_departures
         data_type: bigint
-        description: Train runs over segments starting at this station.
+        description: Compared runs over segments starting at this station (runs over 30 minutes included).
       - name: excess_ride_seconds_sum
         data_type: bigint
-        description: Sum of excess run seconds over those runs. Additive.
+        description: Sum of net excess run seconds over those runs. Additive.
       - name: excess_ride_seconds
         data_type: double
         description: excess_ride_seconds_sum / segment_departures. Signed, not clamped.
@@ -272,12 +524,21 @@ models:
       - name: rider_wait_seconds_lost
         data_type: double
         description: Waiting part of rider_seconds_lost.
+      - name: rider_wait_seconds_lost_with_gaps
+        data_type: double
+        description: Waiting part including the gaps over 1 hour kept as waits (estimate).
       - name: rider_ride_seconds_lost
         data_type: double
         description: In-vehicle part of rider_seconds_lost (first segment after boarding).
       - name: rider_seconds_lost
         data_type: double
         description: Estimated rider-seconds lost beyond the schedule (an estimate, exact, not rounded).
+      - name: rider_seconds_lost_with_gaps
+        data_type: double
+        description: rider_seconds_lost with the gaps over 1 hour kept as waits included in the wait part (estimate).
+      - name: share_of_total_rider_time_lost
+        data_type: double
+        description: rider_seconds_lost / the sum over all cells (wait + ride). Signed, not clamped.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -357,6 +618,36 @@ models:
       - name: seconds_lost_per_entry
         data_type: double
         description: rider_seconds_lost / gated_entries.
+      - name: rider_wait_seconds_lost_with_gaps
+        data_type: double
+        description: Waiting part including the gaps over 1 hour kept as waits (estimate).
+      - name: rider_seconds_lost_with_gaps
+        data_type: double
+        description: rider_seconds_lost with the gaps over 1 hour kept as waits included in the wait part (estimate).
+      - name: seconds_lost_per_entry_with_gaps
+        data_type: double
+        description: rider_seconds_lost_with_gaps / gated_entries.
+      - name: suspension_gap_count
+        data_type: bigint
+        description: Gaps over wait_max_headway_seconds (1 hour). Counted here, not in the ordinary wait sums.
+        data_tests:
+          - not_null
+      - name: suspension_gap_seconds
+        data_type: double
+        description: Sum of those gaps (actual), seconds.
+      - name: waited_gap_count
+        data_type: bigint
+        description: Gaps over 1 hour kept as passenger waits (fct_suspension_gaps.is_passenger_wait).
+      - name: waited_gap_seconds
+        data_type: double
+        description: Sum of those gaps, seconds.
+      - name: non_wait_gap_count
+        data_type: bigint
+        description: Gaps over 1 hour that the recorded data shows were not passenger waits (overnight break). Left
+          out of wait with gaps.
+      - name: non_wait_gap_seconds
+        data_type: double
+        description: Sum of those gaps, seconds.
   - name: mart_rider_time_lost_weekly
     description: 'Weekly trend of estimated rider time lost. Grain: one row per week starting Monday.'
     config:
@@ -408,9 +699,273 @@ models:
       - name: seconds_lost_per_entry
         data_type: double
         description: rider_seconds_lost / gated_entries.
+      - name: rider_seconds_lost_with_gaps
+        data_type: double
+        description: rider_seconds_lost with the gaps over 1 hour kept as waits included in the wait part (estimate).
+      - name: avg_daily_rider_seconds_lost_with_gaps
+        data_type: double
+        description: Average rider-seconds lost with gaps per date with a rider weight.
+      - name: avg_weekday_rider_seconds_lost_with_gaps
+        data_type: double
+        description: Same per weekday.
+      - name: suspension_gap_count
+        data_type: bigint
+        description: Gaps over wait_max_headway_seconds (1 hour). Counted here, not in the ordinary wait sums.
+        data_tests:
+          - not_null
+      - name: suspension_gap_seconds
+        data_type: double
+        description: Sum of those gaps (actual), seconds.
+      - name: non_wait_gap_count
+        data_type: bigint
+        description: Gaps over 1 hour that the recorded data shows were not passenger waits (overnight break). Left
+          out of wait with gaps.
+      - name: non_wait_gap_seconds
+        data_type: double
+        description: Sum of those gaps, seconds.
+  - name: mart_train_delay_daily
+    description: 'Measured train delay per service date: recorded run time over schedule summed over every run in
+      int_train_runs, positive and net, with runs over 30 minutes and not-compared runs counted on their own. Grain:
+      one row per service date.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: service_date
+        data_type: date
+        description: MBTA service date. Trips after midnight belong to the previous date.
+        data_tests:
+          - unique
+          - not_null
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD. Joins to dim_dates.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
+      - name: is_holiday
+        data_type: boolean
+        description: True on holidays (seed holidays).
+      - name: runs_observed
+        data_type: bigint
+        description: All runs after a trip's first observed stop. = runs_compared + the four not-compared counts.
+        data_tests:
+          - not_null
+      - name: runs_compared
+        data_type: bigint
+        description: Runs with actual and scheduled run time both positive.
+      - name: trips_compared
+        data_type: bigint
+        description: Trips with at least one compared run.
+      - name: actual_run_seconds_sum
+        data_type: bigint
+        description: Sum of actual_run_seconds over compared runs (as recorded, including any terminal hold inside
+          it).
+      - name: scheduled_run_seconds_sum
+        data_type: bigint
+        description: Sum of scheduled run seconds over compared runs.
+      - name: terminal_hold_in_actual_seconds_sum
+        data_type: bigint
+        description: Terminal hold that was inside actual_run_seconds and was split out of the run (compared runs).
+      - name: positive_excess_seconds
+        data_type: bigint
+        description: Sum of max(run - scheduled, 0) over compared runs.
+      - name: net_excess_seconds
+        data_type: bigint
+        description: Sum of (run - scheduled) over compared runs = actual_run_seconds_sum - terminal_hold_in_actual_seconds_sum
+          - scheduled_run_seconds_sum.
+      - name: positive_excess_seconds_per_run
+        data_type: double
+        description: positive_excess_seconds / runs_compared.
+      - name: net_excess_seconds_per_run
+        data_type: double
+        description: net_excess_seconds / runs_compared.
+      - name: long_runs
+        data_type: bigint
+        description: Compared runs whose run time is over travel_outlier_seconds (30 min). Included in every sum.
+      - name: long_run_seconds
+        data_type: bigint
+        description: Run time of the runs over 30 minutes.
+      - name: long_run_positive_excess_seconds
+        data_type: bigint
+        description: Positive excess of the runs over 30 minutes (part of positive_excess_seconds).
+      - name: long_run_net_excess_seconds
+        data_type: bigint
+        description: Net excess of the runs over 30 minutes (part of net_excess_seconds).
+      - name: terminal_departure_runs
+        data_type: bigint
+        description: Runs leaving a branch terminal.
+      - name: terminal_hold_runs
+        data_type: bigint
+        description: Terminal departures with a recorded hold.
+      - name: terminal_hold_seconds_sum
+        data_type: bigint
+        description: Recorded time on terminal platforms before departure. Not part of the delay.
+      - name: runs_actual_missing
+        data_type: bigint
+        description: Runs without an actual run time (a timestamp missing).
+      - name: runs_scheduled_missing
+        data_type: bigint
+        description: Runs without a scheduled run time.
+      - name: runs_actual_not_positive
+        data_type: bigint
+        description: Runs whose recorded arrival is at or before the previous arrival (a LAMP timestamp problem).
+      - name: actual_not_positive_net_seconds
+        data_type: bigint
+        description: Sum of actual - scheduled over those runs (not part of the delay).
+      - name: runs_scheduled_not_positive
+        data_type: bigint
+        description: Runs whose scheduled run time is zero or negative.
+      - name: scheduled_not_positive_net_seconds
+        data_type: bigint
+        description: Sum of actual - scheduled over those runs (not part of the delay).
+  - name: mart_train_delay_summary
+    description: 'Headline measured train delay over the loaded window. Grain: one row per day basis (weekday, all_days).'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: day_basis
+        data_type: varchar
+        description: '''weekday'' (weekdays that are not holidays) or ''all_days''.'
+        data_tests:
+          - unique
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - all_days
+      - name: service_dates
+        data_type: integer
+        description: Service dates of the basis.
+      - name: first_service_date
+        data_type: date
+        description: First loaded date.
+      - name: last_service_date
+        data_type: date
+        description: Last loaded date.
+      - name: runs_observed
+        data_type: bigint
+        description: All runs, compared or not.
+        data_tests:
+          - not_null
+      - name: runs_compared
+        data_type: bigint
+        description: Runs with actual and scheduled run time both positive.
+      - name: trips_compared
+        data_type: bigint
+        description: Trips with at least one compared run.
+      - name: actual_run_seconds_sum
+        data_type: bigint
+        description: Sum of actual_run_seconds over compared runs (as recorded, including any terminal hold inside
+          it).
+      - name: scheduled_run_seconds_sum
+        data_type: bigint
+        description: Sum of scheduled run seconds over compared runs.
+      - name: positive_excess_seconds
+        data_type: bigint
+        description: Total positive excess over the window, seconds.
+      - name: net_excess_seconds
+        data_type: bigint
+        description: Total net excess over the window, seconds.
+      - name: avg_daily_runs
+        data_type: double
+        description: runs_compared / service_dates.
+      - name: avg_daily_trips
+        data_type: double
+        description: trips_compared / service_dates.
+      - name: avg_daily_positive_excess_seconds
+        data_type: double
+        description: 'positive_excess_seconds / service_dates: train-seconds over schedule on an average day of
+          the basis (the headline for weekday).'
+      - name: avg_daily_net_excess_seconds
+        data_type: double
+        description: net_excess_seconds / service_dates.
+      - name: positive_excess_seconds_per_run
+        data_type: double
+        description: positive_excess_seconds / runs_compared.
+      - name: net_excess_seconds_per_run
+        data_type: double
+        description: net_excess_seconds / runs_compared.
+      - name: positive_excess_seconds_per_trip
+        data_type: double
+        description: positive_excess_seconds / trips_compared.
+      - name: net_excess_seconds_per_trip
+        data_type: double
+        description: net_excess_seconds / trips_compared.
+      - name: long_runs
+        data_type: bigint
+        description: Compared runs whose run time is over travel_outlier_seconds (30 min). Included in every sum.
+      - name: long_run_positive_excess_seconds
+        data_type: bigint
+        description: Positive excess of the runs over 30 minutes (part of positive_excess_seconds).
+      - name: long_run_net_excess_seconds
+        data_type: bigint
+        description: Net excess of the runs over 30 minutes (part of net_excess_seconds).
+      - name: avg_daily_long_run_positive_excess_seconds
+        data_type: double
+        description: Positive excess of runs over 30 minutes per day.
+      - name: avg_daily_long_run_net_excess_seconds
+        data_type: double
+        description: Net excess of runs over 30 minutes per day.
+      - name: avg_daily_positive_excess_seconds_excl_long_runs
+        data_type: double
+        description: Positive excess per day without the runs over 30 minutes.
+      - name: avg_daily_net_excess_seconds_excl_long_runs
+        data_type: double
+        description: Net excess per day without the runs over 30 minutes.
+      - name: terminal_hold_in_actual_seconds_sum
+        data_type: bigint
+        description: Terminal hold that was inside actual_run_seconds and was split out of the run (compared runs).
+      - name: terminal_departure_runs
+        data_type: bigint
+        description: Runs leaving a branch terminal.
+      - name: terminal_hold_runs
+        data_type: bigint
+        description: Terminal departures with a recorded hold.
+      - name: terminal_hold_seconds_sum
+        data_type: bigint
+        description: Recorded time on terminal platforms before departure, total. Not part of the delay.
+      - name: avg_daily_terminal_hold_seconds
+        data_type: double
+        description: terminal_hold_seconds_sum / service_dates.
+      - name: runs_actual_missing
+        data_type: bigint
+        description: Runs without an actual run time (a timestamp missing).
+      - name: runs_scheduled_missing
+        data_type: bigint
+        description: Runs without a scheduled run time.
+      - name: runs_actual_not_positive
+        data_type: bigint
+        description: Runs whose recorded arrival is at or before the previous arrival (a LAMP timestamp problem).
+      - name: actual_not_positive_net_seconds
+        data_type: bigint
+        description: Sum of actual - scheduled over those runs (not part of the delay).
+      - name: runs_scheduled_not_positive
+        data_type: bigint
+        description: Runs whose scheduled run time is zero or negative.
+      - name: scheduled_not_positive_net_seconds
+        data_type: bigint
+        description: Sum of actual - scheduled over those runs (not part of the delay).
   - name: mart_segment_daily
-    description: 'Per segment and service date: excess run time and rider-weighted loss. Grain: one row per segment
-      and date.'
+    description: 'Per segment and service date: measured train delay (positive and net excess), runs over 30 minutes
+      and terminal holds. Grain: one row per segment and date.'
     config:
       contract:
         enforced: true
@@ -461,25 +1016,53 @@ models:
                   - saturday
                   - sunday
                   - holiday
+      - name: runs_observed
+        data_type: bigint
+        description: All observed runs over the segment that day.
+        data_tests:
+          - not_null
       - name: traversals
         data_type: bigint
-        description: Train runs over the segment compared to the schedule that day.
+        description: Compared runs over the segment that day.
         data_tests:
           - not_null
-      - name: excess_travel_seconds_sum
+      - name: runs_not_compared
         data_type: bigint
-        description: Sum of actual minus scheduled run seconds. Additive.
-      - name: avg_excess_travel_seconds
+        description: Observed runs without both actual and scheduled run time positive (counted, not summed).
+      - name: positive_excess_seconds_sum
+        data_type: bigint
+        description: Sum of max(run - scheduled, 0) over compared runs. Additive.
+      - name: net_excess_seconds_sum
+        data_type: bigint
+        description: Sum of (run - scheduled) over compared runs. Additive, signed.
+      - name: avg_positive_excess_seconds
         data_type: double
-        description: Average actual minus scheduled run seconds per train run.
-      - name: has_rider_data
-        data_type: boolean
-        description: True when a gated-entry rider weight exists; rider_* columns are null otherwise.
-        data_tests:
-          - not_null
-      - name: rider_seconds_lost
+        description: positive_excess_seconds_sum / compared runs.
+      - name: avg_net_excess_seconds
         data_type: double
-        description: Estimated rider-seconds lost beyond the schedule (an estimate, exact, not rounded).
+        description: net_excess_seconds_sum / compared runs.
+      - name: long_runs
+        data_type: bigint
+        description: Compared runs whose run time is over travel_outlier_seconds (30 min). Included in every sum.
+      - name: long_run_positive_excess_seconds_sum
+        data_type: bigint
+        description: Positive excess of the runs over 30 minutes (part of positive_excess_seconds_sum).
+      - name: long_run_net_excess_seconds_sum
+        data_type: bigint
+        description: Net excess of the runs over 30 minutes (part of net_excess_seconds_sum).
+      - name: terminal_hold_runs
+        data_type: bigint
+        description: Terminal departures with a recorded hold.
+      - name: terminal_hold_seconds_sum
+        data_type: bigint
+        description: Recorded time on the terminal platform before departure, summed. Not part of the excess.
+      - name: terminal_hold_negative_runs
+        data_type: bigint
+        description: Terminal holds where LAMP records the departure before the arrival (a timestamp problem). Kept
+          as recorded.
+      - name: terminal_hold_in_actual_seconds_sum
+        data_type: bigint
+        description: Terminal hold that was inside actual_run_seconds and was split out of the run (compared runs).
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -487,8 +1070,8 @@ models:
               - segment_id
               - date_key
   - name: mart_segment_reliability
-    description: 'Per segment over the loaded window: excess travel, buffer time, rider-weighted loss and rank,
-      schedule-or-service class. Grain: one row per segment.'
+    description: 'Per segment over the loaded window: measured train delay (positive and net), rank by weekday train
+      delay, terminal holds, buffer time, schedule-or-service class. Grain: one row per segment.'
     config:
       contract:
         enforced: true
@@ -534,76 +1117,159 @@ models:
         description: '''<start station> to <end station>''.'
         data_tests:
           - not_null
-      - name: traversals
-        data_type: bigint
-        description: Train runs over the segment compared to the schedule.
+      - name: is_terminal_departure
+        data_type: boolean
+        description: 'True when the start station is the first stop of the canonical pattern of the branch (for
+          a segment: of at least one branch that runs over it).'
         data_tests:
           - not_null
+      - name: is_terminal_arrival
+        data_type: boolean
+        description: 'True when the end station is the last stop of the canonical pattern of the branch (for a segment:
+          of at least one branch that runs over it).'
+        data_tests:
+          - not_null
+      - name: runs_observed
+        data_type: bigint
+        description: All observed runs, compared to the schedule or not.
+        data_tests:
+          - not_null
+      - name: traversals
+        data_type: bigint
+        description: Compared runs over the segment (runs over 30 minutes included).
+        data_tests:
+          - not_null
+      - name: runs_not_compared
+        data_type: bigint
+        description: Observed runs without both actual and scheduled run time positive (counted, not summed).
       - name: service_dates_observed
         data_type: integer
         description: Dates with at least one compared run.
-      - name: excess_travel_seconds_sum
+      - name: positive_excess_seconds_sum
         data_type: bigint
-        description: Sum of actual minus scheduled run seconds. Additive.
-      - name: avg_excess_travel_seconds
+        description: Sum of max(run - scheduled, 0) over compared runs. Additive.
+      - name: net_excess_seconds_sum
+        data_type: bigint
+        description: Sum of (run - scheduled) over compared runs. Additive, signed.
+      - name: avg_positive_excess_seconds
         data_type: double
-        description: Average actual minus scheduled run seconds per train run.
+        description: positive_excess_seconds_sum / compared runs.
+      - name: avg_net_excess_seconds
+        data_type: double
+        description: net_excess_seconds_sum / compared runs.
+      - name: weekday_runs
+        data_type: bigint
+        description: Compared runs on weekdays.
+      - name: avg_weekday_runs
+        data_type: double
+        description: weekday_runs / weekdays loaded.
+      - name: avg_weekday_positive_excess_seconds
+        data_type: double
+        description: 'Positive excess summed over weekday runs / weekdays loaded: train delay per average weekday.
+          The rank basis.'
+      - name: avg_weekday_net_excess_seconds
+        data_type: double
+        description: Net excess summed over weekday runs / weekdays loaded.
+      - name: avg_daily_positive_excess_seconds
+        data_type: double
+        description: Positive excess / all service dates loaded.
+      - name: avg_daily_net_excess_seconds
+        data_type: double
+        description: Net excess / all service dates loaded.
+      - name: long_runs
+        data_type: bigint
+        description: Compared runs whose run time is over travel_outlier_seconds (30 min). Included in every sum.
+      - name: long_run_positive_excess_seconds_sum
+        data_type: bigint
+        description: Positive excess of the runs over 30 minutes (part of positive_excess_seconds_sum).
+      - name: long_run_net_excess_seconds_sum
+        data_type: bigint
+        description: Net excess of the runs over 30 minutes (part of net_excess_seconds_sum).
+      - name: avg_weekday_long_run_positive_excess_seconds
+        data_type: double
+        description: Positive excess of the runs over 30 minutes per average weekday (part of avg_weekday_positive_excess_seconds).
+      - name: terminal_time_split
+        data_type: varchar
+        description: '''departure_hold_split'' (terminal hold split out from recorded times), ''departure_hold_not_recorded''
+          (a timestamp is missing), ''arrival_not_split'' (LAMP has no timestamp for holding outside a terminal,
+          so it stays in the run) or ''not_terminal''.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - departure_hold_split
+                  - departure_hold_not_recorded
+                  - arrival_not_split
+                  - not_terminal
+      - name: terminal_hold_runs
+        data_type: bigint
+        description: Terminal departures with a recorded hold.
+      - name: terminal_hold_seconds_sum
+        data_type: bigint
+        description: Recorded time on the terminal platform before departure, summed. Not part of the excess.
+      - name: terminal_hold_negative_runs
+        data_type: bigint
+        description: Terminal holds where LAMP records the departure before the arrival (a timestamp problem). Kept
+          as recorded.
+      - name: terminal_hold_in_actual_seconds_sum
+        data_type: bigint
+        description: Terminal hold that was inside actual_run_seconds and was split out of the run (compared runs).
+      - name: avg_terminal_hold_seconds
+        data_type: double
+        description: terminal_hold_seconds_sum / terminal_hold_runs.
+      - name: avg_weekday_terminal_hold_seconds
+        data_type: double
+        description: Weekday terminal hold seconds / weekdays loaded.
       - name: median_scheduled_run_seconds
         data_type: double
-        description: Median scheduled run time, seconds.
+        description: Median scheduled run time of compared runs, seconds.
       - name: median_run_seconds
         data_type: double
-        description: Median actual run time, seconds.
+        description: Median actual run time of compared runs, seconds.
       - name: p90_run_seconds
         data_type: double
-        description: 90th percentile actual run time, seconds.
+        description: 90th percentile actual run time of compared runs, seconds.
       - name: buffer_seconds
         data_type: double
         description: p90_run_seconds - median_run_seconds.
       - name: buffer_index
         data_type: double
         description: buffer_seconds / median_run_seconds.
-      - name: has_rider_data
-        data_type: boolean
-        description: True when a gated-entry rider weight exists; rider_* columns are null otherwise.
-        data_tests:
-          - not_null
-      - name: rider_seconds_lost
-        data_type: double
-        description: Estimated rider-seconds lost on the segment over the window (in-vehicle part).
-      - name: avg_daily_rider_seconds_lost
-        data_type: double
-        description: rider_seconds_lost / dates with a rider weight.
-      - name: avg_weekday_rider_seconds_lost
-        data_type: double
-        description: Weekday rider_seconds_lost / weekdays with a rider weight.
       - name: loss_rank
         data_type: integer
-        description: Rank by avg_weekday_rider_seconds_lost, highest first, among segments with rider data (ties
-          by segment_id).
+        description: Rank by avg_weekday_positive_excess_seconds (weekday train delay), highest first, among segments
+          with weekday runs (ties by segment_id). Riders are not used.
       - name: is_top_10
         data_type: boolean
         description: loss_rank <= 10.
         data_tests:
           - not_null
-      - name: share_of_segment_loss
+      - name: share_of_segment_train_delay
         data_type: double
-        description: avg_weekday_rider_seconds_lost / sum of the positive values over all segments.
+        description: avg_weekday_positive_excess_seconds / the sum over all segments.
+      - name: start_station_has_gate_data
+        data_type: boolean
+        description: True when the start station has fare-gate entry data for the line.
+      - name: start_station_avg_weekday_entries
+        data_type: double
+        description: People entering the start station on this line through fare gates on an average weekday (all
+          periods). Entries at the station, not riders on the segment. Not used in the rank.
       - name: cause_days
         data_type: integer
-        description: Dates with at least cause_min_runs_per_day runs.
+        description: Dates with at least cause_min_runs_per_day compared runs.
       - name: bias_seconds
         data_type: double
-        description: Median of the daily average excess over cause_days (bias).
+        description: Median of the daily average net excess over cause_days (bias).
       - name: daily_excess_p25_seconds
         data_type: double
-        description: 25th percentile of the daily average excess.
+        description: 25th percentile of the daily average net excess.
       - name: daily_excess_p75_seconds
         data_type: double
-        description: 75th percentile of the daily average excess.
+        description: 75th percentile of the daily average net excess.
       - name: variability_iqr_seconds
         data_type: double
-        description: p75 - p25 of the daily average excess (variability).
+        description: p75 - p25 of the daily average net excess (variability).
       - name: cause_class
         data_type: varchar
         description: schedule, service, mixed or insufficient_data (rule in the model header).
@@ -655,8 +1321,8 @@ models:
         data_type: varchar
         description: Segment with the largest buffer.
   - name: mart_segment_trend
-    description: 'Getting worse per segment: last worse_recent_days dates vs the worse_prior_days before them. Grain:
-      one row per segment.'
+    description: 'Getting worse per segment: last worse_recent_days dates vs the worse_prior_days before them, with
+      every raw value behind the flag. Grain: one row per segment.'
     config:
       contract:
         enforced: true
@@ -708,39 +1374,66 @@ models:
       - name: recent_end_date
         data_type: date
         description: Last date of the recent window (latest loaded service date).
+      - name: recent_dates
+        data_type: integer
+        description: Service dates in the recent window.
+      - name: prior_dates
+        data_type: integer
+        description: Service dates in the prior window.
       - name: runs_recent
         data_type: bigint
         description: Compared runs in the recent window.
       - name: runs_prior
         data_type: bigint
         description: Compared runs in the prior window.
+      - name: positive_excess_seconds_sum_recent
+        data_type: bigint
+        description: Positive excess summed over compared runs, recent window.
+      - name: positive_excess_seconds_sum_prior
+        data_type: bigint
+        description: Same, prior window.
+      - name: net_excess_seconds_sum_recent
+        data_type: bigint
+        description: Net excess summed over compared runs, recent window.
+      - name: net_excess_seconds_sum_prior
+        data_type: bigint
+        description: Same, prior window.
       - name: avg_excess_seconds_recent
         data_type: double
-        description: Average excess per run, recent window.
+        description: Net excess per run, recent window.
       - name: avg_excess_seconds_prior
         data_type: double
-        description: Average excess per run, prior window.
+        description: Net excess per run, prior window.
       - name: delta_excess_seconds
         data_type: double
         description: avg_excess_seconds_recent - avg_excess_seconds_prior.
-      - name: avg_daily_rider_seconds_lost_recent
+      - name: avg_positive_excess_seconds_recent
         data_type: double
-        description: Average daily rider-seconds lost, recent window.
-      - name: avg_daily_rider_seconds_lost_prior
+        description: Positive excess per run, recent window.
+      - name: avg_positive_excess_seconds_prior
         data_type: double
-        description: Average daily rider-seconds lost, prior window.
-      - name: delta_daily_rider_seconds_lost
+        description: Positive excess per run, prior window.
+      - name: delta_positive_excess_seconds
         data_type: double
-        description: Average daily rider-seconds lost, recent minus prior.
-      - name: loss_share_recent
+        description: avg_positive_excess_seconds_recent - avg_positive_excess_seconds_prior.
+      - name: avg_daily_positive_excess_seconds_recent
         data_type: double
-        description: Share of the positive average daily rider time lost of all rows in the recent window.
-      - name: loss_share_prior
+        description: Positive excess per service date of the recent window (train delay per day).
+      - name: avg_daily_positive_excess_seconds_prior
         data_type: double
-        description: Same share in the prior window.
-      - name: loss_share_change
+        description: Same, prior window.
+      - name: delta_daily_positive_excess_seconds
         data_type: double
-        description: loss_share_recent - loss_share_prior.
+        description: Recent minus prior train delay per day.
+      - name: delay_share_recent
+        data_type: double
+        description: avg_daily_positive_excess_seconds_recent / the sum over all segments.
+      - name: delay_share_prior
+        data_type: double
+        description: Same, prior window.
+      - name: delay_share_change
+        data_type: double
+        description: delay_share_recent - delay_share_prior.
       - name: meets_volume_threshold
         data_type: boolean
         description: Cleared both minimum-volume thresholds (worse_min_volume_recent, worse_min_volume_prior).
@@ -749,6 +1442,9 @@ models:
       - name: typical_delta_excess_seconds
         data_type: double
         description: Median delta_excess_seconds over the rows that clear the volume threshold.
+      - name: delta_above_typical_seconds
+        data_type: double
+        description: delta_excess_seconds - typical_delta_excess_seconds.
       - name: is_getting_worse
         data_type: boolean
         description: Volume threshold cleared and delta_excess_seconds >= worse_min_delta_seconds and >= typical
@@ -799,6 +1495,57 @@ models:
       - name: departures_prior
         data_type: bigint
         description: Same, prior window.
+      - name: segment_departures_recent
+        data_type: bigint
+        description: Compared runs over segments starting here, recent window.
+      - name: segment_departures_prior
+        data_type: bigint
+        description: Same, prior window.
+      - name: suspension_gap_count_recent
+        data_type: bigint
+        description: Gaps over 1 hour, recent window.
+      - name: suspension_gap_count_prior
+        data_type: bigint
+        description: Same, prior window.
+      - name: suspension_gap_seconds_recent
+        data_type: double
+        description: Seconds of those gaps, recent window.
+      - name: suspension_gap_seconds_prior
+        data_type: double
+        description: Same, prior window.
+      - name: excess_wait_seconds_recent
+        data_type: double
+        description: Excess wait per rider (gaps of 1 hour or less), recent window.
+      - name: excess_wait_seconds_prior
+        data_type: double
+        description: Same, prior window.
+      - name: delta_excess_wait_seconds
+        data_type: double
+        description: excess_wait_seconds_recent - excess_wait_seconds_prior.
+      - name: excess_ride_seconds_recent
+        data_type: double
+        description: Excess ride per rider, recent window.
+      - name: excess_ride_seconds_prior
+        data_type: double
+        description: Same, prior window.
+      - name: delta_excess_ride_seconds
+        data_type: double
+        description: excess_ride_seconds_recent - excess_ride_seconds_prior.
+      - name: excess_wait_with_gaps_seconds_recent
+        data_type: double
+        description: Excess wait per rider with the gaps over 1 hour kept as waits, recent window.
+      - name: excess_wait_with_gaps_seconds_prior
+        data_type: double
+        description: Same, prior window.
+      - name: excess_seconds_per_rider_with_gaps_recent
+        data_type: double
+        description: Excess wait with gaps + excess ride, recent window.
+      - name: excess_seconds_per_rider_with_gaps_prior
+        data_type: double
+        description: Same, prior window.
+      - name: delta_excess_with_gaps_seconds
+        data_type: double
+        description: Recent minus prior, with gaps.
       - name: excess_seconds_per_rider_recent
         data_type: double
         description: Excess wait + excess ride per rider, pooled over the recent window.
@@ -817,6 +1564,12 @@ models:
       - name: delta_daily_rider_seconds_lost
         data_type: double
         description: Average daily rider-seconds lost, recent minus prior.
+      - name: avg_daily_rider_seconds_lost_with_gaps_recent
+        data_type: double
+        description: Average daily rider-seconds lost with gaps, recent window.
+      - name: avg_daily_rider_seconds_lost_with_gaps_prior
+        data_type: double
+        description: Same, prior window.
       - name: loss_share_recent
         data_type: double
         description: Share of the positive average daily rider time lost of all rows in the recent window.
@@ -834,6 +1587,9 @@ models:
       - name: typical_delta_excess_seconds
         data_type: double
         description: Median delta_excess_seconds over the rows that clear the volume threshold.
+      - name: delta_above_typical_seconds
+        data_type: double
+        description: delta_excess_seconds - typical_delta_excess_seconds.
       - name: is_getting_worse
         data_type: boolean
         description: Volume threshold cleared and delta_excess_seconds >= worse_min_delta_seconds and >= typical

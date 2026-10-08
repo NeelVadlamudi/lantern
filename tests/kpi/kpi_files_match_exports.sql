@@ -1,5 +1,5 @@
 -- Each Parquet file listed in board_data.json `files` has the row count of the export model
--- that wrote it, and all fifteen export files are listed.
+-- that wrote it, and all seventeen export files are listed.
 with listed as (
     select
         listed_file ->> 'file' as file_name,
@@ -82,6 +82,16 @@ exported as (
         'line_buffer.parquet' as file_name,
         count(*) as n_rows
     from {{ ref('board_line_buffer') }}
+    union all
+    select
+        'train_delay_daily.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_train_delay_daily') }}
+    union all
+    select
+        'suspension_gaps.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_suspension_gaps') }}
 )
 
 select

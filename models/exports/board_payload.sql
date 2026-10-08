@@ -15,6 +15,8 @@
 -- depends_on: {{ ref('board_station_trend') }}
 -- depends_on: {{ ref('board_line_buffer') }}
 -- depends_on: {{ ref('board_duration_label_cases') }}
+-- depends_on: {{ ref('board_train_delay_daily') }}
+-- depends_on: {{ ref('board_suspension_gaps') }}
 -- Board summary: one row, one JSON column per top-level block of board_data.json. The
 -- on-run-end hook (macros/write_build_outputs.sql) adds the `build` block and COPYs this row
 -- to out/board_data.json. Runs after every Parquet export so `files` lists what was written.
@@ -109,9 +111,10 @@ meta as (
                 'cause_min_days', {{ var('cause_min_days') }},
                 'cause_dominance_ratio', cast({{ var('cause_dominance_ratio') }} as double)
             ),
-            'method', 'Actual arrival-to-arrival times between stops are compared to the published'
-            || ' schedule for every subway train, and actual gaps between trains to scheduled gaps.'
-            || ' Stations are weighted by fare-gate entries for the same time of day.',
+            'method', 'Recorded run times between stops (arrival to arrival; from departure on a'
+            || ' train''s first stop and out of terminals) are compared to the published schedule for'
+            || ' every subway train, and actual gaps between trains to scheduled gaps. Rider time lost'
+            || ' is an estimate that weights stations by fare-gate entries for the same time of day.',
             'disclaimer', 'Public MBTA data. Live positions from the MBTA V3 API. Not affiliated with the MBTA.',
             'attribution', 'Data provided by MassDOT / MBTA under the MassDOT Developers License Agreement.'
         ) as meta
@@ -596,7 +599,101 @@ data_coverage as (
     cross join green_events
 ),
 
--- decision metrics (rider time lost, segments, buffer, getting worse, schedule or service) ---
+-- decision metrics (train delay, rider time lost, segments, buffer, getting worse, schedule or service)
+
+train_delay_headline as (
+    select tile from {{ ref('board_tiles') }}
+    where tile_id = 'train_delay_weekday'
+),
+
+train_delay_bases as (
+    select
+        to_json(map_from_entries(list((
+            day_basis,
+            json_object(
+                'service_dates', service_dates,
+                'runs_observed', runs_observed,
+                'runs_compared', runs_compared,
+                'trips_compared', trips_compared,
+                'positive_excess_seconds_total', positive_excess_seconds,
+                'net_excess_seconds_total', net_excess_seconds,
+                'avg_daily_positive_seconds', avg_daily_positive_excess_seconds,
+                'avg_daily_positive_label', {{ format_duration('avg_daily_positive_excess_seconds') }},
+                'avg_daily_net_seconds', avg_daily_net_excess_seconds,
+                'avg_daily_net_label', {{ format_duration('avg_daily_net_excess_seconds') }},
+                'avg_daily_runs', avg_daily_runs,
+                'positive_per_run_seconds', positive_excess_seconds_per_run,
+                'positive_per_run_label', {{ format_duration('positive_excess_seconds_per_run') }},
+                'net_per_run_seconds', net_excess_seconds_per_run,
+                'net_per_run_label', {{ format_duration('net_excess_seconds_per_run') }},
+                'positive_per_trip_seconds', positive_excess_seconds_per_trip,
+                'positive_per_trip_label', {{ format_duration('positive_excess_seconds_per_trip') }},
+                'net_per_trip_seconds', net_excess_seconds_per_trip,
+                'net_per_trip_label', {{ format_duration('net_excess_seconds_per_trip') }},
+                'long_runs', long_runs,
+                'long_run_positive_seconds_total', long_run_positive_excess_seconds,
+                'long_run_net_seconds_total', long_run_net_excess_seconds,
+                'avg_daily_positive_excl_long_runs_seconds', avg_daily_positive_excess_seconds_excl_long_runs,
+                'avg_daily_net_excl_long_runs_seconds', avg_daily_net_excess_seconds_excl_long_runs,
+                'runs_actual_missing', runs_actual_missing,
+                'runs_scheduled_missing', runs_scheduled_missing,
+                'runs_actual_not_positive', runs_actual_not_positive,
+                'actual_not_positive_net_seconds', actual_not_positive_net_seconds,
+                'runs_scheduled_not_positive', runs_scheduled_not_positive,
+                'scheduled_not_positive_net_seconds', scheduled_not_positive_net_seconds
+            )
+        ) order by day_basis))) as bases
+    from {{ ref('mart_train_delay_summary') }}
+),
+
+suspension_gap_kind_list as (
+    select kinds.gap_kind
+    from (
+        values
+        ('departure_not_recorded'), ('departure_recorded_inside'), ('no_departure_recorded_inside'),
+        ('spans_service_day_boundary')
+    ) as kinds (gap_kind)
+),
+
+suspension_gap_kind_counts as (
+    select
+        gap_kind,
+        count(*) as n,
+        sum(gap_seconds) as gap_seconds
+    from {{ ref('fct_suspension_gaps') }}
+    group by gap_kind
+),
+
+suspension_gap_kinds as (
+    select
+        to_json(map_from_entries(list((
+            kinds.gap_kind,
+            json_object('count', coalesce(counted.n, 0), 'seconds', coalesce(counted.gap_seconds, 0))
+        ) order by kinds.gap_kind))) as by_kind
+    from suspension_gap_kind_list as kinds
+    left join suspension_gap_kind_counts as counted on kinds.gap_kind = counted.gap_kind
+),
+
+suspension_gap_totals as (
+    select
+        json_object(
+            'threshold_seconds', {{ var('wait_max_headway_seconds') }},
+            'count', count(*),
+            'seconds', coalesce(sum(gaps.gap_seconds), 0),
+            'label', {{ format_duration('coalesce(sum(gaps.gap_seconds), 0)') }},
+            'waited_count', count(*) filter (where gaps.is_passenger_wait),
+            'waited_seconds', coalesce(sum(gaps.gap_seconds) filter (where gaps.is_passenger_wait), 0),
+            'non_wait_count', count(*) filter (where not gaps.is_passenger_wait),
+            'non_wait_seconds', coalesce(sum(gaps.gap_seconds) filter (where not gaps.is_passenger_wait), 0),
+            'by_kind', any_value(suspension_gap_kinds.by_kind),
+            'rule', 'Gaps over 1 hour between trains at a platform are kept in their own columns. Each is'
+            || ' checked against the recorded departures: a gap that starts on an earlier service date'
+            || ' runs through the overnight break and is not a wait; where trains were recorded leaving'
+            || ' the platform inside the gap, the wait is split at those departures.'
+        ) as gaps
+    from {{ ref('fct_suspension_gaps') }} as gaps
+    cross join suspension_gap_kinds
+),
 
 rider_headline as (
     select tile from {{ ref('board_tiles') }}
@@ -639,11 +736,26 @@ top_segments as (
                 'direction_id', direction_id,
                 'from_station_id', from_station_id,
                 'to_station_id', to_station_id,
-                'avg_weekday_rider_time_lost_seconds', avg_weekday_rider_time_lost_seconds,
-                'avg_weekday_rider_time_lost_label', avg_weekday_rider_time_lost_label,
-                'share_of_segment_loss', share_of_segment_loss,
-                'avg_excess_travel_seconds', avg_excess_travel_seconds,
-                'avg_excess_travel_label', avg_excess_travel_label,
+                'train_delay_weekday_seconds', train_delay_weekday_seconds,
+                'train_delay_weekday_label', train_delay_weekday_label,
+                'train_delay_weekday_net_seconds', train_delay_weekday_net_seconds,
+                'train_delay_weekday_net_label', train_delay_weekday_net_label,
+                'avg_weekday_runs', avg_weekday_runs,
+                'positive_excess_per_run_seconds', positive_excess_per_run_seconds,
+                'positive_excess_per_run_label', positive_excess_per_run_label,
+                'net_excess_per_run_seconds', net_excess_per_run_seconds,
+                'net_excess_per_run_label', net_excess_per_run_label,
+                'share_of_segment_train_delay', share_of_segment_train_delay,
+                'long_runs', long_runs,
+                'long_run_train_delay_weekday_seconds', long_run_train_delay_weekday_seconds,
+                'is_terminal_departure', is_terminal_departure,
+                'is_terminal_arrival', is_terminal_arrival,
+                'terminal_time_split', terminal_time_split,
+                'terminal_hold_weekday_seconds', terminal_hold_weekday_seconds,
+                'terminal_hold_weekday_label', terminal_hold_weekday_label,
+                'terminal_hold_per_run_seconds', terminal_hold_per_run_seconds,
+                'terminal_hold_per_run_label', terminal_hold_per_run_label,
+                'start_station_avg_weekday_entries', start_station_avg_weekday_entries,
                 'buffer_seconds', buffer_seconds,
                 'buffer_label', buffer_label,
                 'buffer_index', buffer_index,
@@ -651,15 +763,18 @@ top_segments as (
             )
             order by loss_rank
         )) as segments,
-        sum(avg_weekday_rider_time_lost_seconds) as top_10_seconds
+        sum(train_delay_weekday_seconds) as top_10_seconds
     from top_segment_rows
 ),
 
 segment_totals as (
     select
-        sum(greatest(avg_weekday_rider_time_lost_seconds, 0)) as positive_segment_seconds,
+        sum(train_delay_weekday_seconds) as segment_train_delay_seconds,
         count(*) as segments,
-        count(*) filter (where has_rider_data) as segments_with_rider_data
+        count(*) filter (where start_station_has_gate_data) as segments_with_start_station_gate_data,
+        count(*) filter (where is_terminal_departure) as terminal_departure_segments,
+        count(*) filter (where is_terminal_arrival) as terminal_arrival_segments,
+        count(*) filter (where is_terminal_departure or is_terminal_arrival) as terminal_segments
     from {{ ref('board_segments') }}
 ),
 
@@ -684,9 +799,15 @@ worse_segments as (
                 'direction_id', direction_id,
                 'runs_recent', runs_recent,
                 'runs_prior', runs_prior,
+                'avg_excess_seconds_recent', avg_excess_seconds_recent,
+                'avg_excess_seconds_prior', avg_excess_seconds_prior,
                 'delta_excess_seconds', delta_excess_seconds,
                 'delta_excess_label', delta_excess_label,
-                'loss_share_change', loss_share_change
+                'avg_positive_excess_seconds_recent', avg_positive_excess_seconds_recent,
+                'avg_positive_excess_seconds_prior', avg_positive_excess_seconds_prior,
+                'delta_positive_excess_seconds', delta_positive_excess_seconds,
+                'delta_above_typical_seconds', delta_above_typical_seconds,
+                'delay_share_change', delay_share_change
             )
             order by delta_excess_seconds desc, segment_id asc
         )) as segments
@@ -703,8 +824,14 @@ worse_stations as (
                 'line_id', line_id,
                 'departures_recent', departures_recent,
                 'departures_prior', departures_prior,
+                'excess_per_rider_recent_seconds', excess_per_rider_recent_seconds,
+                'excess_per_rider_prior_seconds', excess_per_rider_prior_seconds,
                 'delta_excess_seconds', delta_excess_seconds,
                 'delta_excess_label', delta_excess_label,
+                'delta_excess_wait_seconds', delta_excess_wait_seconds,
+                'delta_excess_ride_seconds', delta_excess_ride_seconds,
+                'delta_above_typical_seconds', delta_above_typical_seconds,
+                'delta_excess_with_gaps_seconds', delta_excess_with_gaps_seconds,
                 'loss_share_change', loss_share_change
             )
             order by delta_excess_seconds desc, station_id asc, line_id asc
@@ -757,22 +884,39 @@ line_buffers as (
 decision as (
     select
         json_object(
+            'train_delay', json_object(
+                'headline', train_delay_headline.tile,
+                'is_estimate', false,
+                'by_day_basis', train_delay_bases.bases,
+                'rule', 'Every recorded run between two stops: actual arrival-to-arrival time minus'
+                || ' scheduled time. Positive counts late time only (max(actual - scheduled, 0)); net lets'
+                || ' faster runs offset slower ones. Runs over 30 minutes are included and also shown on'
+                || ' their own. Runs without both times positive are counted by reason, not summed.'
+            ),
             'rider_time_lost', json_object(
                 'headline', rider_headline.tile,
                 'is_estimate', true,
+                'estimate_note', 'Estimate based on people entering stations through fare gates,'
+                || ' assuming riders arrive at random times (expected wait = sum(h^2) / (2 sum(h))).',
                 'clamped_at_zero', false,
                 'clamp_note', 'Not clamped: cells where trains ran closer together or faster than'
                 || ' scheduled offset cells where they ran slower, so this is net time lost.',
+                'suspension_gaps', suspension_gap_totals.gaps,
                 'weekly', coalesce(rider_weekly.weeks, json('[]'))
             ),
             'segments', json_object(
                 'segments', segment_totals.segments,
-                'segments_with_rider_data', segment_totals.segments_with_rider_data,
+                'segments_with_start_station_gate_data', segment_totals.segments_with_start_station_gate_data,
+                'terminal_segments', segment_totals.terminal_segments,
+                'terminal_departure_segments', segment_totals.terminal_departure_segments,
+                'terminal_arrival_segments', segment_totals.terminal_arrival_segments,
                 'top_10', coalesce(top_segments.segments, json('[]')),
-                'top_10_share_of_segment_loss',
-                top_segments.top_10_seconds / nullif(segment_totals.positive_segment_seconds, 0),
-                'top_10_share_rule', 'Average weekday rider-weighted loss of the 10 top segments divided'
-                || ' by the sum of the positive losses of all segments (in-vehicle time only).'
+                'top_10_share_of_segment_train_delay',
+                top_segments.top_10_seconds / nullif(segment_totals.segment_train_delay_seconds, 0),
+                'rank_rule', 'Segments ranked by measured train delay: positive excess seconds summed over'
+                || ' weekday train runs, per average weekday. Riders are not used in the rank.',
+                'top_10_share_rule', 'Weekday train delay of the 10 top segments divided by the sum over'
+                || ' all segments.'
             ),
             'line_buffer', coalesce(line_buffers.line_buffer_list, json('[]')),
             'cause_counts', cause_counts.counts,
@@ -797,6 +941,9 @@ decision as (
             )
         ) as decision
     from rider_headline
+    cross join train_delay_headline
+    cross join train_delay_bases
+    cross join suspension_gap_totals
     cross join rider_weekly
     cross join top_segments
     cross join segment_totals

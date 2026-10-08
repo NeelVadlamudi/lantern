@@ -1,16 +1,21 @@
 -- Grain: one row per track segment. "Getting worse": the last var('worse_recent_days')
 -- service dates (ending on the latest loaded date) against the var('worse_prior_days') dates
--- before them.
---   delta_excess_seconds = average excess run time per train run, recent minus prior.
---   loss share = the segment's average daily rider-weighted loss as a share of the positive
---     losses of all segments in the same window; share_change = recent share - prior share.
+-- before them. Every raw value behind the flag is a column, for every row:
+--   runs_*, positive_excess_seconds_sum_*, net_excess_seconds_sum_*  compared runs and their
+--     summed excess in each window (exact seconds; runs over 30 minutes included)
+--   avg_excess_seconds_* = net excess per run (net sum / runs); delta_excess_seconds = recent -
+--     prior. avg_positive_excess_seconds_* and delta_positive_excess_seconds: the same, positive only.
+--   avg_daily_positive_excess_seconds_* = positive excess per service date of the window (train
+--     delay per day); delay_share_* = that value as a share of the sum over all segments;
+--     delay_share_change = recent - prior.
 --   is_getting_worse = clears the volume threshold (at least var('worse_min_volume_recent')
 --     runs in the recent window and var('worse_min_volume_prior') in the prior window, about
---     21 a day; below that a few odd days move the average), the delta is at least
+--     21 a day; below that a few odd days move the average), delta_excess_seconds is at least
 --     var('worse_min_delta_seconds') (5 s), and it is at least 5 s above the typical delta
 --     (typical_delta_excess_seconds: the median delta of the rows that clear the volume
 --     threshold). The whole system can get slower at once; the flag picks out the ones that
---     got worse by more than the rest.
+--     got worse by more than the rest. The flag is a rule on top of the values; it changes
+--     nothing in them.
 
 with segment_days as (
 
@@ -37,7 +42,21 @@ bounds as (
         max(service_date) as recent_end_date,
         max(service_date) - {{ var('worse_recent_days') }} + 1 as recent_start_date,
         max(service_date) - {{ var('worse_recent_days') }} - {{ var('worse_prior_days') }} + 1 as prior_start_date
-    from {{ ref('mart_rider_time_lost_daily') }}
+    from {{ ref('mart_train_delay_daily') }}
+
+),
+
+window_dates as (
+
+    select
+        count(*) filter (where daily.service_date >= bounds.recent_start_date) as recent_dates,
+        count(*) filter (
+            where
+            daily.service_date >= bounds.prior_start_date
+            and daily.service_date < bounds.recent_start_date
+        ) as prior_dates
+    from {{ ref('mart_train_delay_daily') }} as daily
+    cross join bounds
 
 ),
 
@@ -54,36 +73,16 @@ windowed as (
 
 ),
 
-window_dates as (
-
-    select
-        count(*) filter (where daily.has_rider_data and daily.service_date >= bounds.recent_start_date)
-            as recent_dates_with_riders,
-        count(*) filter (
-            where
-            daily.has_rider_data
-            and daily.service_date >= bounds.prior_start_date
-            and daily.service_date < bounds.recent_start_date
-        ) as prior_dates_with_riders
-    from {{ ref('mart_rider_time_lost_daily') }} as daily
-    cross join bounds
-
-),
-
 per_segment as (
 
     select
         segment_id,
-        coalesce(sum(traversals) filter (where trend_window = 'recent'), 0) as runs_recent,
-        coalesce(sum(traversals) filter (where trend_window = 'prior'), 0) as runs_prior,
-        sum(excess_travel_seconds_sum) filter (where trend_window = 'recent')
-        / sum(traversals) filter (where trend_window = 'recent') as avg_excess_seconds_recent,
-        sum(excess_travel_seconds_sum) filter (where trend_window = 'prior')
-        / sum(traversals) filter (where trend_window = 'prior') as avg_excess_seconds_prior,
-        bool_or(has_rider_data) filter (where trend_window = 'recent') as has_riders_recent,
-        bool_or(has_rider_data) filter (where trend_window = 'prior') as has_riders_prior,
-        sum(rider_seconds_lost) filter (where trend_window = 'recent') as rider_seconds_lost_recent,
-        sum(rider_seconds_lost) filter (where trend_window = 'prior') as rider_seconds_lost_prior
+        sum(traversals) filter (where trend_window = 'recent') as runs_recent,
+        sum(traversals) filter (where trend_window = 'prior') as runs_prior,
+        sum(positive_excess_seconds_sum) filter (where trend_window = 'recent') as positive_sum_recent,
+        sum(positive_excess_seconds_sum) filter (where trend_window = 'prior') as positive_sum_prior,
+        sum(net_excess_seconds_sum) filter (where trend_window = 'recent') as net_sum_recent,
+        sum(net_excess_seconds_sum) filter (where trend_window = 'prior') as net_sum_prior
     from windowed
     where trend_window is not null
     group by segment_id
@@ -96,16 +95,18 @@ averaged as (
         segments.*,
         coalesce(per_segment.runs_recent, 0) as runs_recent,
         coalesce(per_segment.runs_prior, 0) as runs_prior,
-        per_segment.avg_excess_seconds_recent,
-        per_segment.avg_excess_seconds_prior,
-        case
-            when per_segment.has_riders_recent
-                then per_segment.rider_seconds_lost_recent / nullif(window_dates.recent_dates_with_riders, 0)
-        end as avg_daily_rider_seconds_lost_recent,
-        case
-            when per_segment.has_riders_prior
-                then per_segment.rider_seconds_lost_prior / nullif(window_dates.prior_dates_with_riders, 0)
-        end as avg_daily_rider_seconds_lost_prior
+        coalesce(per_segment.positive_sum_recent, 0) as positive_sum_recent,
+        coalesce(per_segment.positive_sum_prior, 0) as positive_sum_prior,
+        coalesce(per_segment.net_sum_recent, 0) as net_sum_recent,
+        coalesce(per_segment.net_sum_prior, 0) as net_sum_prior,
+        per_segment.net_sum_recent / nullif(per_segment.runs_recent, 0) as avg_excess_seconds_recent,
+        per_segment.net_sum_prior / nullif(per_segment.runs_prior, 0) as avg_excess_seconds_prior,
+        per_segment.positive_sum_recent / nullif(per_segment.runs_recent, 0) as avg_positive_excess_seconds_recent,
+        per_segment.positive_sum_prior / nullif(per_segment.runs_prior, 0) as avg_positive_excess_seconds_prior,
+        coalesce(per_segment.positive_sum_recent, 0) / nullif(window_dates.recent_dates, 0)
+            as avg_daily_positive_excess_seconds_recent,
+        coalesce(per_segment.positive_sum_prior, 0) / nullif(window_dates.prior_dates, 0)
+            as avg_daily_positive_excess_seconds_prior
     from segments
     cross join window_dates
     left join per_segment on segments.segment_id = per_segment.segment_id
@@ -116,10 +117,10 @@ shared as (
 
     select
         *,
-        avg_daily_rider_seconds_lost_recent
-        / nullif(sum(greatest(avg_daily_rider_seconds_lost_recent, 0)) over (), 0) as loss_share_recent,
-        avg_daily_rider_seconds_lost_prior
-        / nullif(sum(greatest(avg_daily_rider_seconds_lost_prior, 0)) over (), 0) as loss_share_prior
+        avg_daily_positive_excess_seconds_recent
+        / nullif(sum(avg_daily_positive_excess_seconds_recent) over (), 0) as delay_share_recent,
+        avg_daily_positive_excess_seconds_prior
+        / nullif(sum(avg_daily_positive_excess_seconds_prior) over (), 0) as delay_share_prior
     from averaged
 
 ),
@@ -145,25 +146,39 @@ select
     cast(bounds.recent_start_date - 1 as date) as prior_end_date,
     cast(bounds.recent_start_date as date) as recent_start_date,
     cast(bounds.recent_end_date as date) as recent_end_date,
+    cast(window_dates.recent_dates as integer) as recent_dates,
+    cast(window_dates.prior_dates as integer) as prior_dates,
     cast(shared.runs_recent as bigint) as runs_recent,
     cast(shared.runs_prior as bigint) as runs_prior,
+    cast(shared.positive_sum_recent as bigint) as positive_excess_seconds_sum_recent,
+    cast(shared.positive_sum_prior as bigint) as positive_excess_seconds_sum_prior,
+    cast(shared.net_sum_recent as bigint) as net_excess_seconds_sum_recent,
+    cast(shared.net_sum_prior as bigint) as net_excess_seconds_sum_prior,
     cast(shared.avg_excess_seconds_recent as double) as avg_excess_seconds_recent,
     cast(shared.avg_excess_seconds_prior as double) as avg_excess_seconds_prior,
     cast(shared.avg_excess_seconds_recent - shared.avg_excess_seconds_prior as double) as delta_excess_seconds,
-    cast(shared.avg_daily_rider_seconds_lost_recent as double) as avg_daily_rider_seconds_lost_recent,
-    cast(shared.avg_daily_rider_seconds_lost_prior as double) as avg_daily_rider_seconds_lost_prior,
+    cast(shared.avg_positive_excess_seconds_recent as double) as avg_positive_excess_seconds_recent,
+    cast(shared.avg_positive_excess_seconds_prior as double) as avg_positive_excess_seconds_prior,
+    cast(shared.avg_positive_excess_seconds_recent - shared.avg_positive_excess_seconds_prior as double)
+        as delta_positive_excess_seconds,
+    cast(shared.avg_daily_positive_excess_seconds_recent as double) as avg_daily_positive_excess_seconds_recent,
+    cast(shared.avg_daily_positive_excess_seconds_prior as double) as avg_daily_positive_excess_seconds_prior,
     cast(
-        shared.avg_daily_rider_seconds_lost_recent - shared.avg_daily_rider_seconds_lost_prior as double
-    ) as delta_daily_rider_seconds_lost,
-    cast(shared.loss_share_recent as double) as loss_share_recent,
-    cast(shared.loss_share_prior as double) as loss_share_prior,
-    cast(shared.loss_share_recent - shared.loss_share_prior as double) as loss_share_change,
+        shared.avg_daily_positive_excess_seconds_recent - shared.avg_daily_positive_excess_seconds_prior as double
+    ) as delta_daily_positive_excess_seconds,
+    cast(shared.delay_share_recent as double) as delay_share_recent,
+    cast(shared.delay_share_prior as double) as delay_share_prior,
+    cast(shared.delay_share_recent - shared.delay_share_prior as double) as delay_share_change,
     cast(
         shared.runs_recent >= {{ var('worse_min_volume_recent') }}
         and shared.runs_prior >= {{ var('worse_min_volume_prior') }}
         as boolean
     ) as meets_volume_threshold,
     cast(typical.typical_delta_excess_seconds as double) as typical_delta_excess_seconds,
+    cast(
+        shared.avg_excess_seconds_recent - shared.avg_excess_seconds_prior - typical.typical_delta_excess_seconds
+        as double
+    ) as delta_above_typical_seconds,
     cast(
         coalesce(
             shared.runs_recent >= {{ var('worse_min_volume_recent') }}
@@ -177,4 +192,5 @@ select
     ) as is_getting_worse
 from shared
 cross join bounds
+cross join window_dates
 cross join typical

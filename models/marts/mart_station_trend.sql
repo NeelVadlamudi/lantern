@@ -13,7 +13,9 @@
 --     var('worse_min_delta_seconds') (5 s), and it is at least 5 s above the typical delta
 --     (typical_delta_excess_seconds: the median delta of the rows that clear the volume
 --     threshold). The whole system can get slower at once; the flag picks out the ones that
---     got worse by more than the rest.
+--     got worse by more than the rest. The flag uses gaps of 1 hour or less; the same values
+--     with the gaps over 1 hour that count as waits are in the *_with_gaps columns, and every
+--     raw value (wait and ride parts, departures, gap counts, deltas) is a column on every row.
 
 with cells as (
 
@@ -76,12 +78,22 @@ pooled as (
         line_id,
         trend_window,
         sum(headway_observations) as headway_observations,
+        sum(segment_departures) as segment_departures,
+        sum(suspension_gap_count) as suspension_gap_count,
+        sum(suspension_gap_seconds) as suspension_gap_seconds,
+        sum(non_wait_gap_count) as non_wait_gap_count,
         sum(actual_headway_squared_sum) / nullif(2 * sum(actual_headway_seconds_sum), 0)
         - sum(scheduled_headway_squared_sum) / nullif(2 * sum(scheduled_headway_seconds_sum), 0)
             as excess_wait_seconds,
+        (sum(coalesce(actual_headway_squared_sum, 0)) + sum(waited_gap_squared_sum))
+        / nullif(2 * (sum(coalesce(actual_headway_seconds_sum, 0)) + sum(waited_gap_seconds)), 0)
+        - (sum(coalesce(scheduled_headway_squared_sum, 0)) + sum(waited_gap_scheduled_squared_sum))
+        / nullif(2 * (sum(coalesce(scheduled_headway_seconds_sum, 0)) + sum(waited_gap_scheduled_seconds)), 0)
+            as excess_wait_with_gaps_seconds,
         sum(excess_ride_seconds_sum) / nullif(sum(segment_departures), 0) as excess_ride_seconds,
         bool_or(has_rider_data) as has_rider_data,
-        sum(rider_seconds_lost) as rider_seconds_lost
+        sum(rider_seconds_lost) as rider_seconds_lost,
+        sum(rider_seconds_lost_with_gaps) as rider_seconds_lost_with_gaps
     from windowed
     where trend_window is not null
     group by station_id, line_id, trend_window
@@ -97,10 +109,42 @@ per_station as (
             as departures_recent,
         coalesce(max(recent_or_prior.headway_observations) filter (where recent_or_prior.trend_window = 'prior'), 0)
             as departures_prior,
+        coalesce(max(recent_or_prior.segment_departures) filter (where recent_or_prior.trend_window = 'recent'), 0)
+            as segment_departures_recent,
+        coalesce(max(recent_or_prior.segment_departures) filter (where recent_or_prior.trend_window = 'prior'), 0)
+            as segment_departures_prior,
+        coalesce(max(recent_or_prior.suspension_gap_count) filter (where recent_or_prior.trend_window = 'recent'), 0)
+            as suspension_gap_count_recent,
+        coalesce(max(recent_or_prior.suspension_gap_count) filter (where recent_or_prior.trend_window = 'prior'), 0)
+            as suspension_gap_count_prior,
+        coalesce(max(recent_or_prior.suspension_gap_seconds) filter (where recent_or_prior.trend_window = 'recent'), 0)
+            as suspension_gap_seconds_recent,
+        coalesce(max(recent_or_prior.suspension_gap_seconds) filter (where recent_or_prior.trend_window = 'prior'), 0)
+            as suspension_gap_seconds_prior,
+        max(recent_or_prior.excess_wait_seconds) filter (where recent_or_prior.trend_window = 'recent')
+            as excess_wait_seconds_recent,
+        max(recent_or_prior.excess_wait_seconds) filter (where recent_or_prior.trend_window = 'prior')
+            as excess_wait_seconds_prior,
+        max(recent_or_prior.excess_wait_with_gaps_seconds) filter (where recent_or_prior.trend_window = 'recent')
+            as excess_wait_with_gaps_seconds_recent,
+        max(recent_or_prior.excess_wait_with_gaps_seconds) filter (where recent_or_prior.trend_window = 'prior')
+            as excess_wait_with_gaps_seconds_prior,
+        max(recent_or_prior.excess_ride_seconds) filter (where recent_or_prior.trend_window = 'recent')
+            as excess_ride_seconds_recent,
+        max(recent_or_prior.excess_ride_seconds) filter (where recent_or_prior.trend_window = 'prior')
+            as excess_ride_seconds_prior,
         max(coalesce(recent_or_prior.excess_wait_seconds, 0) + coalesce(recent_or_prior.excess_ride_seconds, 0))
         filter (where recent_or_prior.trend_window = 'recent') as excess_seconds_per_rider_recent,
         max(coalesce(recent_or_prior.excess_wait_seconds, 0) + coalesce(recent_or_prior.excess_ride_seconds, 0))
         filter (where recent_or_prior.trend_window = 'prior') as excess_seconds_per_rider_prior,
+        max(
+            coalesce(recent_or_prior.excess_wait_with_gaps_seconds, 0)
+            + coalesce(recent_or_prior.excess_ride_seconds, 0)
+        ) filter (where recent_or_prior.trend_window = 'recent') as excess_seconds_per_rider_with_gaps_recent,
+        max(
+            coalesce(recent_or_prior.excess_wait_with_gaps_seconds, 0)
+            + coalesce(recent_or_prior.excess_ride_seconds, 0)
+        ) filter (where recent_or_prior.trend_window = 'prior') as excess_seconds_per_rider_with_gaps_prior,
         max(
             case when recent_or_prior.has_rider_data then recent_or_prior.rider_seconds_lost end
         ) filter (where recent_or_prior.trend_window = 'recent')
@@ -108,7 +152,15 @@ per_station as (
         max(
             case when recent_or_prior.has_rider_data then recent_or_prior.rider_seconds_lost end
         ) filter (where recent_or_prior.trend_window = 'prior')
-        / nullif(max(window_dates.prior_dates_with_riders), 0) as avg_daily_rider_seconds_lost_prior
+        / nullif(max(window_dates.prior_dates_with_riders), 0) as avg_daily_rider_seconds_lost_prior,
+        max(
+            case when recent_or_prior.has_rider_data then recent_or_prior.rider_seconds_lost_with_gaps end
+        ) filter (where recent_or_prior.trend_window = 'recent')
+        / nullif(max(window_dates.recent_dates_with_riders), 0) as avg_daily_rider_seconds_lost_with_gaps_recent,
+        max(
+            case when recent_or_prior.has_rider_data then recent_or_prior.rider_seconds_lost_with_gaps end
+        ) filter (where recent_or_prior.trend_window = 'prior')
+        / nullif(max(window_dates.prior_dates_with_riders), 0) as avg_daily_rider_seconds_lost_with_gaps_prior
     from pooled as recent_or_prior
     cross join window_dates
     group by recent_or_prior.station_id, recent_or_prior.line_id
@@ -150,6 +202,25 @@ select
     cast(bounds.recent_end_date as date) as recent_end_date,
     cast(shared.departures_recent as bigint) as departures_recent,
     cast(shared.departures_prior as bigint) as departures_prior,
+    cast(shared.segment_departures_recent as bigint) as segment_departures_recent,
+    cast(shared.segment_departures_prior as bigint) as segment_departures_prior,
+    cast(shared.suspension_gap_count_recent as bigint) as suspension_gap_count_recent,
+    cast(shared.suspension_gap_count_prior as bigint) as suspension_gap_count_prior,
+    cast(shared.suspension_gap_seconds_recent as double) as suspension_gap_seconds_recent,
+    cast(shared.suspension_gap_seconds_prior as double) as suspension_gap_seconds_prior,
+    cast(shared.excess_wait_seconds_recent as double) as excess_wait_seconds_recent,
+    cast(shared.excess_wait_seconds_prior as double) as excess_wait_seconds_prior,
+    cast(shared.excess_wait_seconds_recent - shared.excess_wait_seconds_prior as double) as delta_excess_wait_seconds,
+    cast(shared.excess_ride_seconds_recent as double) as excess_ride_seconds_recent,
+    cast(shared.excess_ride_seconds_prior as double) as excess_ride_seconds_prior,
+    cast(shared.excess_ride_seconds_recent - shared.excess_ride_seconds_prior as double) as delta_excess_ride_seconds,
+    cast(shared.excess_wait_with_gaps_seconds_recent as double) as excess_wait_with_gaps_seconds_recent,
+    cast(shared.excess_wait_with_gaps_seconds_prior as double) as excess_wait_with_gaps_seconds_prior,
+    cast(shared.excess_seconds_per_rider_with_gaps_recent as double) as excess_seconds_per_rider_with_gaps_recent,
+    cast(shared.excess_seconds_per_rider_with_gaps_prior as double) as excess_seconds_per_rider_with_gaps_prior,
+    cast(
+        shared.excess_seconds_per_rider_with_gaps_recent - shared.excess_seconds_per_rider_with_gaps_prior as double
+    ) as delta_excess_with_gaps_seconds,
     cast(shared.excess_seconds_per_rider_recent as double) as excess_seconds_per_rider_recent,
     cast(shared.excess_seconds_per_rider_prior as double) as excess_seconds_per_rider_prior,
     cast(shared.excess_seconds_per_rider_recent - shared.excess_seconds_per_rider_prior as double)
@@ -159,6 +230,9 @@ select
     cast(
         shared.avg_daily_rider_seconds_lost_recent - shared.avg_daily_rider_seconds_lost_prior as double
     ) as delta_daily_rider_seconds_lost,
+    cast(shared.avg_daily_rider_seconds_lost_with_gaps_recent as double)
+        as avg_daily_rider_seconds_lost_with_gaps_recent,
+    cast(shared.avg_daily_rider_seconds_lost_with_gaps_prior as double) as avg_daily_rider_seconds_lost_with_gaps_prior,
     cast(shared.loss_share_recent as double) as loss_share_recent,
     cast(shared.loss_share_prior as double) as loss_share_prior,
     cast(shared.loss_share_recent - shared.loss_share_prior as double) as loss_share_change,
@@ -168,6 +242,10 @@ select
         as boolean
     ) as meets_volume_threshold,
     cast(typical.typical_delta_excess_seconds as double) as typical_delta_excess_seconds,
+    cast(
+        shared.excess_seconds_per_rider_recent - shared.excess_seconds_per_rider_prior
+        - typical.typical_delta_excess_seconds as double
+    ) as delta_above_typical_seconds,
     cast(
         coalesce(
             shared.departures_recent >= {{ var('worse_min_volume_recent') }}

@@ -7,6 +7,10 @@
 -- points nearest each station, as [lon, lat]). If the shape does not run from one station to
 -- the other in order, a straight line between the two stations is used instead
 -- (geometry_source says which).
+-- Terminal flags: is_terminal_departure when the start station is the first stop of the
+-- canonical pattern of at least one branch that runs over the segment (a line or branch
+-- terminal, e.g. Alewife, Braintree, Government Center for Green-B and Green-C);
+-- is_terminal_arrival when the end station is the last stop of at least one such pattern.
 
 with stop_sequence as (
 
@@ -26,7 +30,10 @@ pairs as (
         direction_id,
         stop_order as from_stop_order,
         station_id as from_station_id,
-        lead(station_id) over (partition by branch_route_id, direction_id order by stop_order) as to_station_id
+        lead(station_id) over (partition by branch_route_id, direction_id order by stop_order) as to_station_id,
+        stop_order = min(stop_order) over (partition by branch_route_id, direction_id) as is_from_terminal,
+        lead(stop_order) over (partition by branch_route_id, direction_id order by stop_order)
+        = max(stop_order) over (partition by branch_route_id, direction_id) as is_to_terminal
     from stop_sequence
 
 ),
@@ -41,7 +48,9 @@ segments as (
         list(distinct branch_route_id order by branch_route_id) as branch_route_ids,
         min(branch_route_id) as geometry_branch_route_id,
         arg_min(route_id, branch_route_id) as route_id,
-        min(from_stop_order) as from_stop_order
+        min(from_stop_order) as from_stop_order,
+        bool_or(is_from_terminal) as is_terminal_departure,
+        bool_or(is_to_terminal) as is_terminal_arrival
     from pairs
     where to_station_id is not null
     group by line_id, direction_id, from_station_id, to_station_id
@@ -140,6 +149,8 @@ select
     cast(from_station.station_name || ' to ' || to_station.station_name as varchar) as segment_name,
     cast(segments.branch_route_ids as varchar[]) as branch_route_ids,
     cast(segments.from_stop_order as integer) as from_stop_order,
+    cast(segments.is_terminal_departure as boolean) as is_terminal_departure,
+    cast(segments.is_terminal_arrival as boolean) as is_terminal_arrival,
     cast(
         coalesce(
             shape_geometry.geometry,

@@ -6,7 +6,7 @@
 |---|---|---|---|---|---|
 | Sources | `models/staging/_sources.yml` | | public files read in place (`external_location`) | | No copy step. Freshness on the LAMP index. |
 | Staging | `models/staging` | `stg_<source>__<entity>` | LAMP incremental; GTFS and Open Data tables kept between builds | | One model per source table. Rename, cast, convert time zones, dedupe. No joins and no business rules, except the representative-trip filter on GTFS stop_times, trips and shapes. |
-| Intermediate | `models/intermediate` | `int_<entity>__<verb>` or `int_<entity>` | view | protected | Joins and business logic that more than one mart needs. Not for direct use. |
+| Intermediate | `models/intermediate` | `int_<entity>__<verb>` or `int_<entity>` | view (table when several marts read a large result, e.g. `int_train_runs`) | protected | Joins and business logic that more than one mart needs. Not for direct use. |
 | Marts | `models/marts` | `dim_`, `fct_`, `mart_` | table (fact is incremental) | public | Contract enforced. Grain stated in the first sentence of every description. |
 | Exports | `models/exports` | `board_` | external Parquet in `out/` (zstd); `board_tiles`, `board_line_totals`, `board_payload`, `board_duration_label_cases` are tables | | Column subsets of marts for the board. No logic beyond selecting, renaming, sorting and adding `_label` columns, except the four JSON models, which pool and format the marts for `out/board_data.json` and `out/duration_label_cases.json`. |
 
@@ -36,6 +36,10 @@
   decision exports). Exports add `<metric>_label` from the `format_duration()` macro: two
   largest units, 1 month = 30 days, 1 year = 365 days, the cut part rounded half up and carried.
   The board's formatter is tested against `out/duration_label_cases.json`.
+- Measured values are kept as recorded: no clamping, capping, dropping or estimating. When a
+  part has to be told apart (late vs net excess, runs over 30 minutes, terminal holds, gaps over
+  1 hour, runs that cannot be compared), it gets its own exact column or count, and the parts
+  add up to the recorded total. Estimates (rider time lost) are labeled as estimates.
 
 ## SQL style
 

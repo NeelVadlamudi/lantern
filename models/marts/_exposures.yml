@@ -28,6 +28,8 @@ exposures:
       - ref('board_station_trend')
       - ref('board_line_buffer')
       - ref('board_duration_label_cases')
+      - ref('board_train_delay_daily')
+      - ref('board_suspension_gaps')
       - ref('board_payload')
     owner:
       name: Neel Vadlamudi

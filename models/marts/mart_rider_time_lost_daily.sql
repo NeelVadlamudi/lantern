@@ -3,6 +3,10 @@
 -- mart_station_rider_time_lost. An estimate (gated entries weight, first-segment ride time;
 -- see that model). Dates without a rider weight for their day type (a holiday when the rider
 -- basis window has no holiday) have has_rider_data = false and null rider totals.
+-- Wait is given without and with the gaps over 1 hour (*_with_gaps; see
+-- mart_station_rider_time_lost and fct_suspension_gaps). The gaps themselves are counted in
+-- suspension_gap_* (all), waited_gap_* (kept as passenger waits) and non_wait_gap_* (shown by
+-- the recorded data not to be waits); suspension = waited + non-wait.
 
 with cells as (
 
@@ -32,7 +36,15 @@ daily as (
         sum(gated_entries) as gated_entries,
         sum(rider_wait_seconds_lost) as rider_wait_seconds_lost,
         sum(rider_ride_seconds_lost) as rider_ride_seconds_lost,
-        sum(rider_seconds_lost) as rider_seconds_lost
+        sum(rider_seconds_lost) as rider_seconds_lost,
+        sum(rider_wait_seconds_lost_with_gaps) as rider_wait_seconds_lost_with_gaps,
+        sum(rider_seconds_lost_with_gaps) as rider_seconds_lost_with_gaps,
+        sum(suspension_gap_count) as suspension_gap_count,
+        sum(suspension_gap_seconds) as suspension_gap_seconds,
+        sum(waited_gap_count) as waited_gap_count,
+        sum(waited_gap_seconds) as waited_gap_seconds,
+        sum(non_wait_gap_count) as non_wait_gap_count,
+        sum(non_wait_gap_seconds) as non_wait_gap_seconds
     from cells
     group by date_key
 
@@ -52,6 +64,16 @@ select
     cast(daily.rider_wait_seconds_lost as double) as rider_wait_seconds_lost,
     cast(daily.rider_ride_seconds_lost as double) as rider_ride_seconds_lost,
     cast(daily.rider_seconds_lost as double) as rider_seconds_lost,
-    cast(daily.rider_seconds_lost / nullif(daily.gated_entries, 0) as double) as seconds_lost_per_entry
+    cast(daily.rider_seconds_lost / nullif(daily.gated_entries, 0) as double) as seconds_lost_per_entry,
+    cast(daily.rider_wait_seconds_lost_with_gaps as double) as rider_wait_seconds_lost_with_gaps,
+    cast(daily.rider_seconds_lost_with_gaps as double) as rider_seconds_lost_with_gaps,
+    cast(daily.rider_seconds_lost_with_gaps / nullif(daily.gated_entries, 0) as double)
+        as seconds_lost_per_entry_with_gaps,
+    cast(daily.suspension_gap_count as bigint) as suspension_gap_count,
+    cast(daily.suspension_gap_seconds as double) as suspension_gap_seconds,
+    cast(daily.waited_gap_count as bigint) as waited_gap_count,
+    cast(daily.waited_gap_seconds as double) as waited_gap_seconds,
+    cast(daily.non_wait_gap_count as bigint) as non_wait_gap_count,
+    cast(daily.non_wait_gap_seconds as double) as non_wait_gap_seconds
 from daily
 inner join dates on daily.date_key = dates.date_key

@@ -180,7 +180,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: [rider_time_lost, late_trip_share, avg_trip_excess_seconds, long_gap_share, weekday_entries_in_long_gaps, worst_line, freshness]
+                values: [train_delay_weekday, rider_time_lost, late_trip_share, avg_trip_excess_seconds, long_gap_share, weekday_entries_in_long_gaps, worst_line, freshness]
       - name: tile
         data_tests:
           - not_null
@@ -190,14 +190,14 @@ models:
     data_tests:
       - dbt_utils.expression_is_true:
           arguments:
-            expression: "json_array_length(tiles) = 7 and json_array_length(lines) = 8"
+            expression: "json_array_length(tiles) = 8 and json_array_length(lines) = 8"
     columns:
       - name: meta
         data_tests:
           - not_null
 
   - name: board_segments
-    description: "Parquet file out/segments.parquet. Grain: one row per track segment, with geometry. Time measures as <metric>_seconds (exact) and <metric>_label (format_duration)."
+    description: "Parquet file out/segments.parquet. Grain: one row per track segment, with geometry. Time measures as <metric>_seconds (exact) and <metric>_label (format_duration). Ranked (loss_rank, is_top_10) by train_delay_weekday_seconds."
     columns:
       - name: segment_id
         data_tests:
@@ -237,6 +237,24 @@ models:
       - dbt_utils.unique_combination_of_columns:
           arguments:
             combination_of_columns: [station_id, line_id]
+
+  - name: board_train_delay_daily
+    description: "Parquet file out/train_delay_daily.parquet. Grain: one row per service date. Measured train delay, positive and net, exact seconds plus labels."
+    columns:
+      - name: service_date
+        data_tests:
+          - unique
+          - not_null
+
+  - name: board_suspension_gaps
+    description: "Parquet file out/suspension_gaps.parquet. Grain: one row per departure that ended a gap over 1 hour, with gap_kind from the check against recorded departures."
+    columns:
+      - name: gap_kind
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [spans_service_day_boundary, departure_recorded_inside, departure_not_recorded, no_departure_recorded_inside]
 
   - name: board_line_buffer
     description: "Parquet file out/line_buffer.parquet. Grain: one row per line."
@@ -282,6 +300,8 @@ unit_tests:
       - input: ref('mart_rider_time_lost_weekly')
         rows: []
       - input: ref('mart_segment_reliability')
+        rows: []
+      - input: ref('mart_train_delay_summary')
         rows: []
     expect:
       format: csv
@@ -337,6 +357,8 @@ unit_tests:
         rows: []
       - input: ref('mart_segment_reliability')
         rows: []
+      - input: ref('mart_train_delay_summary')
+        rows: []
     expect:
       format: csv
       rows: |
@@ -382,8 +404,12 @@ unit_tests:
           - {week_start_date: 2026-08-17, rider_seconds_lost: 121732461.82}
       - input: ref('mart_segment_reliability')
         rows:
-          - {segment_id: a, loss_rank: 1, avg_weekday_rider_seconds_lost: 438216.99}
-          - {segment_id: b, loss_rank: 2, avg_weekday_rider_seconds_lost: 190266.0}
+          - {segment_id: a, loss_rank: 1, avg_weekday_positive_excess_seconds: 438216.99}
+          - {segment_id: b, loss_rank: 2, avg_weekday_positive_excess_seconds: 190266.0}
+      - input: ref('mart_train_delay_summary')
+        rows:
+          - {day_basis: weekday, avg_daily_positive_excess_seconds: 740596.19, avg_daily_net_excess_seconds: 124311.1, positive_excess_seconds_per_run: 20.37}
+          - {day_basis: all_days, avg_daily_positive_excess_seconds: 1.0, avg_daily_net_excess_seconds: 1.0, positive_excess_seconds_per_run: 1.0}
     expect:
       rows:
         - {sort_order: 101, case_source: mart, label: 5 months 24 days}
@@ -391,3 +417,6 @@ unit_tests:
         - {sort_order: 103, case_source: mart, label: 8 months 18 days}
         - {sort_order: 104, case_source: mart, label: 3 years 10 months}
         - {sort_order: 105, case_source: mart, label: 5 days 2 h}
+        - {sort_order: 106, case_source: mart, label: 8 days 14 h}
+        - {sort_order: 107, case_source: mart, label: 1 day 11 h}
+        - {sort_order: 108, case_source: mart, label: 20 s}

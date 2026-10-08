@@ -1,7 +1,9 @@
 -- Segment rules recomputed from the stored columns:
 --   cause_class follows the documented rule (cause_min_days, cause_dominance_ratio);
 --   is_getting_worse is set exactly when the volume and delta thresholds are met;
---   loss_rank runs 1..n over segments with rider data, and is_top_10 is rank <= 10;
+--   loss_rank runs 1..n by avg_weekday_positive_excess_seconds (weekday train delay) over the
+--     segments with weekday runs, and is_top_10 is rank <= 10; riders play no part;
+--   share_of_segment_train_delay adds up to 1;
 --   buffer_seconds >= 0.
 with reliability as (
     select
@@ -12,8 +14,10 @@ with reliability as (
             when variability_iqr_seconds >= {{ var('cause_dominance_ratio') }} * abs(bias_seconds) then 'service'
             else 'mixed'
         end as expected_class,
+        avg_weekday_positive_excess_seconds is not null as has_weekday_runs,
         row_number() over (
-            partition by has_rider_data order by avg_weekday_rider_seconds_lost desc, segment_id asc
+            partition by avg_weekday_positive_excess_seconds is not null
+            order by avg_weekday_positive_excess_seconds desc, segment_id asc
         ) as expected_rank
     from {{ ref('mart_segment_reliability') }}
 ),
@@ -55,8 +59,14 @@ select
     segment_id as row_id
 from reliability
 where
-    (has_rider_data and (loss_rank != expected_rank or is_top_10 != (expected_rank <= 10)))
-    or (not has_rider_data and (loss_rank is not null or is_top_10))
+    (has_weekday_runs and (loss_rank != expected_rank or is_top_10 != (expected_rank <= 10)))
+    or (not has_weekday_runs and (loss_rank is not null or is_top_10))
+union all
+select
+    'share adds up to 1' as rule_name,
+    cast(sum(share_of_segment_train_delay) as varchar) as row_id
+from reliability
+having abs(sum(share_of_segment_train_delay) - 1) > 1e-9
 union all
 select
     'buffer' as rule_name,

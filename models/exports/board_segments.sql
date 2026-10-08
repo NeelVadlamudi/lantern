@@ -3,11 +3,15 @@
         location=env_var('MBTA_OUT_DIR', 'out') ~ '/segments.parquet'
     )
 }}
--- Board file: track segments with geometry, reliability, buffer time, rider-weighted loss,
--- schedule-or-service class and the "getting worse" comparison (dim_segments,
--- mart_segment_reliability, mart_segment_trend). Grain: one row per segment.
+-- Board file: track segments with geometry, measured train delay and its rank, terminal
+-- holding, buffer time, schedule-or-service class and the "getting worse" comparison
+-- (dim_segments, mart_segment_reliability, mart_segment_trend). Grain: one row per segment.
 -- Every time measure is exact seconds (<metric>_seconds) plus a label from format_duration
--- (<metric>_label). Rider-weighted values are estimates.
+-- (<metric>_label). train_delay_* is positive excess (late time only); *_net_* lets faster
+-- runs offset slower ones. Ranked by train_delay_weekday_seconds. The only rider number is
+-- start_station_avg_weekday_entries: people entering the start station, not riders on the segment.
+-- On terminal departures the train delay is in-motion time over schedule; the recorded time on
+-- the terminal platform before leaving is terminal_hold_* (not part of the delay).
 
 select
     segments.segment_id,
@@ -22,10 +26,36 @@ select
     segments.branch_route_ids,
     segments.geometry,
     segments.geometry_source,
+    reliability.is_terminal_departure,
+    reliability.is_terminal_arrival,
+    reliability.terminal_time_split,
+    reliability.runs_observed,
     reliability.traversals,
+    reliability.runs_not_compared,
+    reliability.long_runs,
     reliability.service_dates_observed,
-    reliability.avg_excess_travel_seconds,
-    {{ format_duration('reliability.avg_excess_travel_seconds') }} as avg_excess_travel_label,
+    reliability.avg_weekday_runs,
+    reliability.avg_weekday_positive_excess_seconds as train_delay_weekday_seconds,
+    {{ format_duration('reliability.avg_weekday_positive_excess_seconds') }} as train_delay_weekday_label,
+    reliability.avg_weekday_net_excess_seconds as train_delay_weekday_net_seconds,
+    {{ format_duration('reliability.avg_weekday_net_excess_seconds') }} as train_delay_weekday_net_label,
+    reliability.avg_daily_positive_excess_seconds as train_delay_all_days_seconds,
+    {{ format_duration('reliability.avg_daily_positive_excess_seconds') }} as train_delay_all_days_label,
+    reliability.avg_daily_net_excess_seconds as train_delay_all_days_net_seconds,
+    {{ format_duration('reliability.avg_daily_net_excess_seconds') }} as train_delay_all_days_net_label,
+    reliability.avg_positive_excess_seconds as positive_excess_per_run_seconds,
+    {{ format_duration('reliability.avg_positive_excess_seconds') }} as positive_excess_per_run_label,
+    reliability.avg_net_excess_seconds as net_excess_per_run_seconds,
+    {{ format_duration('reliability.avg_net_excess_seconds') }} as net_excess_per_run_label,
+    reliability.avg_weekday_long_run_positive_excess_seconds as long_run_train_delay_weekday_seconds,
+    {{ format_duration('reliability.avg_weekday_long_run_positive_excess_seconds') }}
+        as long_run_train_delay_weekday_label,
+    reliability.terminal_hold_runs,
+    reliability.terminal_hold_negative_runs,
+    reliability.avg_terminal_hold_seconds as terminal_hold_per_run_seconds,
+    {{ format_duration('reliability.avg_terminal_hold_seconds') }} as terminal_hold_per_run_label,
+    reliability.avg_weekday_terminal_hold_seconds as terminal_hold_weekday_seconds,
+    {{ format_duration('reliability.avg_weekday_terminal_hold_seconds') }} as terminal_hold_weekday_label,
     reliability.median_scheduled_run_seconds,
     {{ format_duration('reliability.median_scheduled_run_seconds') }} as median_scheduled_run_label,
     reliability.median_run_seconds,
@@ -35,14 +65,11 @@ select
     reliability.buffer_seconds,
     {{ format_duration('reliability.buffer_seconds') }} as buffer_label,
     reliability.buffer_index,
-    reliability.has_rider_data,
-    reliability.avg_weekday_rider_seconds_lost as avg_weekday_rider_time_lost_seconds,
-    {{ format_duration('reliability.avg_weekday_rider_seconds_lost') }} as avg_weekday_rider_time_lost_label,
-    reliability.avg_daily_rider_seconds_lost as avg_daily_rider_time_lost_seconds,
-    {{ format_duration('reliability.avg_daily_rider_seconds_lost') }} as avg_daily_rider_time_lost_label,
     reliability.loss_rank,
     reliability.is_top_10,
-    reliability.share_of_segment_loss,
+    reliability.share_of_segment_train_delay,
+    reliability.start_station_has_gate_data,
+    reliability.start_station_avg_weekday_entries,
     reliability.cause_class,
     reliability.cause_days,
     reliability.bias_seconds,
@@ -53,16 +80,34 @@ select
     trend.recent_end_date,
     trend.prior_start_date,
     trend.prior_end_date,
+    trend.recent_dates,
+    trend.prior_dates,
     trend.runs_recent,
     trend.runs_prior,
+    trend.positive_excess_seconds_sum_recent,
+    trend.positive_excess_seconds_sum_prior,
+    trend.net_excess_seconds_sum_recent,
+    trend.net_excess_seconds_sum_prior,
     trend.avg_excess_seconds_recent,
     trend.avg_excess_seconds_prior,
     trend.delta_excess_seconds,
     {{ format_duration('trend.delta_excess_seconds') }} as delta_excess_label,
-    trend.loss_share_recent,
-    trend.loss_share_prior,
-    trend.loss_share_change,
+    trend.avg_positive_excess_seconds_recent,
+    trend.avg_positive_excess_seconds_prior,
+    trend.delta_positive_excess_seconds,
+    {{ format_duration('trend.delta_positive_excess_seconds') }} as delta_positive_excess_label,
+    trend.avg_daily_positive_excess_seconds_recent as train_delay_daily_recent_seconds,
+    {{ format_duration('trend.avg_daily_positive_excess_seconds_recent') }} as train_delay_daily_recent_label,
+    trend.avg_daily_positive_excess_seconds_prior as train_delay_daily_prior_seconds,
+    {{ format_duration('trend.avg_daily_positive_excess_seconds_prior') }} as train_delay_daily_prior_label,
+    trend.delta_daily_positive_excess_seconds as delta_train_delay_daily_seconds,
+    {{ format_duration('trend.delta_daily_positive_excess_seconds') }} as delta_train_delay_daily_label,
+    trend.delay_share_recent,
+    trend.delay_share_prior,
+    trend.delay_share_change,
     trend.meets_volume_threshold,
+    trend.typical_delta_excess_seconds,
+    trend.delta_above_typical_seconds,
     trend.is_getting_worse
 from {{ ref('dim_segments') }} as segments
 inner join {{ ref('mart_segment_reliability') }} as reliability on segments.segment_id = reliability.segment_id

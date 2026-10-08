@@ -22,6 +22,14 @@ select
     avg_weekday_rider_seconds_lost as avg_weekday_rider_time_lost_seconds,
     {{ format_duration('avg_weekday_rider_seconds_lost') }} as avg_weekday_rider_time_lost_label,
     seconds_lost_per_entry as time_lost_per_entry_seconds,
-    {{ format_duration('seconds_lost_per_entry') }} as time_lost_per_entry_label
+    {{ format_duration('seconds_lost_per_entry') }} as time_lost_per_entry_label,
+    avg_weekday_rider_seconds_lost_with_gaps as avg_weekday_rider_time_lost_with_gaps_seconds,
+    {{ format_duration('avg_weekday_rider_seconds_lost_with_gaps') }} as avg_weekday_rider_time_lost_with_gaps_label,
+    avg_daily_rider_seconds_lost_with_gaps as avg_daily_rider_time_lost_with_gaps_seconds,
+    {{ format_duration('avg_daily_rider_seconds_lost_with_gaps') }} as avg_daily_rider_time_lost_with_gaps_label,
+    suspension_gap_count,
+    suspension_gap_seconds,
+    non_wait_gap_count,
+    non_wait_gap_seconds
 from {{ ref('mart_rider_time_lost_weekly') }}
 order by week_start_date

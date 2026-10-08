@@ -62,3 +62,25 @@ models:
         data_tests:
           - unique
           - not_null
+
+  - name: int_train_runs
+    description: >
+      Every train run between two observed stops, compared to the schedule or not, with the
+      recorded times split into dwell at the start stop, time in motion, and the terminal
+      platform hold on runs leaving a branch terminal. Grain: one row per trip-stop event after
+      the trip's first observed stop. One definition for mart_train_delay_daily and
+      fct_segment_traversals; see the model header for every column.
+    columns:
+      - name: trip_stop_event_key
+        data_tests:
+          - unique
+          - not_null
+      - name: run_comparison_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [compared, actual_missing, scheduled_missing, actual_not_positive, scheduled_not_positive]
+      - name: terminal_time_split
+        data_tests:
+          - not_null

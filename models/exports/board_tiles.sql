@@ -1,6 +1,8 @@
 {{ config(materialized='table') }}
--- Board headline tiles: one row per tile, in display order. Rider time lost (the main measure)
--- comes first and is an estimate for an average weekday, with the all-days value next to it.
+-- Board headline tiles: one row per tile, in display order. Measured train delay comes first:
+-- recorded train run time over the schedule on an average weekday (mart_train_delay_summary),
+-- positive (late time only) and net, with the all-days values next to it. Rider time lost is
+-- second and is an estimate (people entering stations, riders assumed to arrive at random).
 -- Every tile has `sentence`: one plain sentence filled from the tile's own values. Time values
 -- also carry exact seconds (value_seconds) and a format_duration label (value_label). The late, excess and long-gap
 -- tiles are over all days (weekdays, weekends and holidays); value_weekday carries the same
@@ -12,8 +14,9 @@
 --   rider tile: summed over mart_station_overview (gated stations only)
 --   worst line: board_line_totals, ties broken by display order
 --   freshness: last service date in dim_dates against today's date in Boston
+--   train delay: mart_train_delay_summary, weekday and all_days rows
 --   rider time lost: mart_rider_time_lost_daily, averaged over weekdays (and all days) with a
---     rider weight
+--     rider weight; *_with_gaps adds the gaps over 1 hour that count as passenger waits
 
 with
 
@@ -67,9 +70,37 @@ worst_relative as (
     limit 1
 ),
 
+train_delay as (
+    select
+        summary_weekday.service_dates as weekdays,
+        summary_weekday.avg_daily_positive_excess_seconds as weekday_seconds,
+        summary_weekday.avg_daily_net_excess_seconds as weekday_net_seconds,
+        summary_weekday.avg_daily_runs as weekday_runs,
+        summary_weekday.positive_excess_seconds_per_run as weekday_per_run_seconds,
+        summary_weekday.net_excess_seconds_per_run as weekday_net_per_run_seconds,
+        summary_weekday.long_runs / summary_weekday.service_dates as weekday_long_runs,
+        summary_weekday.avg_daily_long_run_positive_excess_seconds as weekday_long_run_seconds,
+        summary_weekday.avg_daily_long_run_net_excess_seconds as weekday_long_run_net_seconds,
+        summary_weekday.avg_daily_positive_excess_seconds_excl_long_runs as weekday_excl_long_runs_seconds,
+        summary_weekday.avg_daily_net_excess_seconds_excl_long_runs as weekday_excl_long_runs_net_seconds,
+        summary_weekday.avg_daily_terminal_hold_seconds as weekday_terminal_hold_seconds,
+        summary_all_days.service_dates,
+        summary_all_days.avg_daily_positive_excess_seconds as all_days_seconds,
+        summary_all_days.avg_daily_net_excess_seconds as all_days_net_seconds,
+        summary_all_days.avg_daily_runs as all_days_runs,
+        summary_all_days.positive_excess_seconds_per_run as all_days_per_run_seconds,
+        summary_all_days.net_excess_seconds_per_run as all_days_net_per_run_seconds
+    from {{ ref('mart_train_delay_summary') }} as summary_weekday
+    cross join {{ ref('mart_train_delay_summary') }} as summary_all_days
+    where summary_weekday.day_basis = 'weekday' and summary_all_days.day_basis = 'all_days'
+),
+
 rider_time as (
     select
         avg(rider_seconds_lost) filter (where day_type = 'weekday') as weekday_seconds,
+        avg(rider_seconds_lost_with_gaps) filter (where day_type = 'weekday') as weekday_with_gaps_seconds,
+        avg(rider_wait_seconds_lost_with_gaps) filter (where day_type = 'weekday') as weekday_wait_with_gaps_seconds,
+        avg(rider_seconds_lost_with_gaps) as all_days_with_gaps_seconds,
         avg(rider_wait_seconds_lost) filter (where day_type = 'weekday') as weekday_wait_seconds,
         avg(rider_ride_seconds_lost) filter (where day_type = 'weekday') as weekday_ride_seconds,
         sum(rider_seconds_lost) filter (where day_type = 'weekday')
@@ -93,13 +124,79 @@ freshness as (
 tiles as (
     select
         0 as sort_order,
+        'train_delay_weekday' as tile_id,
+        train_delay.weekday_seconds as value_number,
+        train_delay.weekday_seconds as value_weekday,
+        {{ format_duration('train_delay.weekday_seconds') }} as value_text,
+        json_object(
+            'id', 'train_delay_weekday',
+            'label', 'Train time over schedule',
+            'day_basis', 'weekday',
+            'is_estimate', false,
+            'value', train_delay.weekday_seconds,
+            'value_seconds', train_delay.weekday_seconds,
+            'value_label', {{ format_duration('train_delay.weekday_seconds') }},
+            'display', {{ format_duration('train_delay.weekday_seconds') }},
+            'net_seconds', train_delay.weekday_net_seconds,
+            'net_label', {{ format_duration('train_delay.weekday_net_seconds') }},
+            'runs', train_delay.weekday_runs,
+            'weekdays', train_delay.weekdays,
+            'per_run_seconds', train_delay.weekday_per_run_seconds,
+            'per_run_label', {{ format_duration('train_delay.weekday_per_run_seconds') }},
+            'net_per_run_seconds', train_delay.weekday_net_per_run_seconds,
+            'net_per_run_label', {{ format_duration('train_delay.weekday_net_per_run_seconds') }},
+            'long_runs', train_delay.weekday_long_runs,
+            'long_run_seconds', train_delay.weekday_long_run_seconds,
+            'long_run_label', {{ format_duration('train_delay.weekday_long_run_seconds') }},
+            'long_run_net_seconds', train_delay.weekday_long_run_net_seconds,
+            'excl_long_runs_seconds', train_delay.weekday_excl_long_runs_seconds,
+            'excl_long_runs_label', {{ format_duration('train_delay.weekday_excl_long_runs_seconds') }},
+            'excl_long_runs_net_seconds', train_delay.weekday_excl_long_runs_net_seconds,
+            'excl_long_runs_net_label', {{ format_duration('train_delay.weekday_excl_long_runs_net_seconds') }},
+            'terminal_hold_seconds', train_delay.weekday_terminal_hold_seconds,
+            'terminal_hold_label', {{ format_duration('train_delay.weekday_terminal_hold_seconds') }},
+            'all_days_value_seconds', train_delay.all_days_seconds,
+            'all_days_value_label', {{ format_duration('train_delay.all_days_seconds') }},
+            'all_days_net_seconds', train_delay.all_days_net_seconds,
+            'all_days_net_label', {{ format_duration('train_delay.all_days_net_seconds') }},
+            'all_days_runs', train_delay.all_days_runs,
+            'all_days_per_run_seconds', train_delay.all_days_per_run_seconds,
+            'all_days_per_run_label', {{ format_duration('train_delay.all_days_per_run_seconds') }},
+            'all_days_net_per_run_seconds', train_delay.all_days_net_per_run_seconds,
+            'all_days_net_per_run_label', {{ format_duration('train_delay.all_days_net_per_run_seconds') }},
+            'service_dates', train_delay.service_dates,
+            'sentence', 'On an average weekday, each train run between two stops took '
+            || {{ format_duration('train_delay.weekday_per_run_seconds') }}
+            || ' longer than scheduled, counting late time only ('
+            || {{ format_duration('train_delay.weekday_net_per_run_seconds') }} || ' net of early runs).',
+            'sentence_total', 'Across about ' || format('{:,.0f}', train_delay.weekday_runs)
+            || ' runs a weekday, that adds up to '
+            || {{ format_duration('train_delay.weekday_seconds') }} || ' of train time over schedule ('
+            || {{ format_duration('train_delay.weekday_net_seconds') }} || ' net).',
+            'explainer', 'Measured from recorded train runs: for every run between two stops, the recorded'
+            || ' time from arrival at one stop to arrival at the next (from departure on a train''s first'
+            || ' stop and when it leaves a terminal) minus scheduled time, summed over the runs of each weekday and'
+            || ' averaged over ' || train_delay.weekdays || ' weekdays. Late time only counts runs slower'
+            || ' than scheduled; net lets faster runs offset slower ones. Runs over 30 minutes are'
+            || ' included (' || {{ format_duration('train_delay.weekday_long_run_seconds') }}
+            || ' a weekday). Time trains spend on terminal platforms before leaving ('
+            || {{ format_duration('train_delay.weekday_terminal_hold_seconds') }}
+            || ' a weekday) is shown separately and not counted. Over all days the average is '
+            || {{ format_duration('train_delay.all_days_seconds') }} || ' a day.'
+        ) as tile
+    from train_delay
+
+    union all
+
+    select
+        1 as sort_order,
         'rider_time_lost' as tile_id,
         rider_time.weekday_seconds as value_number,
         rider_time.weekday_seconds as value_weekday,
         {{ format_duration('rider_time.weekday_seconds') }} as value_text,
         json_object(
             'id', 'rider_time_lost',
-            'label', 'Rider time lost beyond the schedule',
+            'label', 'Rider time lost beyond the schedule (estimate)',
             'day_basis', 'weekday',
             'is_estimate', true,
             'value', rider_time.weekday_seconds,
@@ -119,22 +216,33 @@ tiles as (
             'all_days_per_entry_seconds', rider_time.all_days_seconds_per_entry,
             'all_days_per_entry_label', {{ format_duration('rider_time.all_days_seconds_per_entry') }},
             'service_dates', rider_time.service_dates,
-            'sentence', 'Riders lost about ' || {{ format_duration('rider_time.weekday_seconds') }}
+            'with_gaps_seconds', rider_time.weekday_with_gaps_seconds,
+            'with_gaps_label', {{ format_duration('rider_time.weekday_with_gaps_seconds') }},
+            'wait_with_gaps_seconds', rider_time.weekday_wait_with_gaps_seconds,
+            'wait_with_gaps_label', {{ format_duration('rider_time.weekday_wait_with_gaps_seconds') }},
+            'all_days_with_gaps_seconds', rider_time.all_days_with_gaps_seconds,
+            'all_days_with_gaps_label', {{ format_duration('rider_time.all_days_with_gaps_seconds') }},
+            'sentence', 'Riders lost an estimated ' || {{ format_duration('rider_time.weekday_seconds') }}
             || ' waiting and riding beyond the schedule on an average weekday.',
-            'explainer', 'Estimate, summed over gated stations, lines and times of day: gate entries times'
+            'sentence_with_gaps', 'Counting the gaps over 1 hour as waits too, the estimate is '
+            || {{ format_duration('rider_time.weekday_with_gaps_seconds') }} || ' a weekday.',
+            'explainer', 'Estimate based on people entering stations, assuming riders arrive at random'
+            || ' times. Summed over gated stations, lines and times of day: gate entries times'
             || ' (expected wait with the actual gaps between trains minus expected wait with the scheduled'
             || ' gaps, plus extra run time on the next segment). That is about '
             || {{ format_duration('rider_time.weekday_seconds_per_entry') }} || ' per entry; '
             || {{ format_duration('rider_time.weekday_wait_seconds') }} || ' of the total is waiting and '
             || {{ format_duration('rider_time.weekday_ride_seconds') }} || ' is riding. Over all days the'
-            || ' average is ' || {{ format_duration('rider_time.all_days_seconds') }} || ' a day.'
+            || ' average is ' || {{ format_duration('rider_time.all_days_seconds') }} || ' a day. Gaps'
+            || ' over 1 hour are left out of the wait here; with them it is '
+            || {{ format_duration('rider_time.weekday_with_gaps_seconds') }} || ' a weekday.'
         ) as tile
     from rider_time
 
     union all
 
     select
-        1 as sort_order,
+        2 as sort_order,
         'late_trip_share' as tile_id,
         {{ board_round('system_wide.late_trip_share', 4) }} as value_number,
         {{ board_round('weekday.late_trip_share', 4) }} as value_weekday,
@@ -160,7 +268,7 @@ tiles as (
     union all
 
     select
-        2 as sort_order,
+        3 as sort_order,
         'avg_trip_excess_seconds' as tile_id,
         {{ board_round('system_wide.avg_trip_excess_seconds', 1) }} as value_number,
         {{ board_round('weekday.avg_trip_excess_seconds', 1) }} as value_weekday,
@@ -195,7 +303,7 @@ tiles as (
     union all
 
     select
-        3 as sort_order,
+        4 as sort_order,
         'long_gap_share' as tile_id,
         {{ board_round('system_wide.long_gap_share', 4) }} as value_number,
         {{ board_round('weekday.long_gap_share', 4) }} as value_weekday,
@@ -220,7 +328,7 @@ tiles as (
     union all
 
     select
-        4 as sort_order,
+        5 as sort_order,
         'weekday_entries_in_long_gaps' as tile_id,
         round_even(weekday_entries_in_long_gaps, 0) as value_number,
         null as value_weekday,
@@ -248,7 +356,7 @@ tiles as (
     union all
 
     select
-        5 as sort_order,
+        6 as sort_order,
         'worst_line' as tile_id,
         {{ board_round('worst_late.late_trip_share', 4) }} as value_number,
         null as value_weekday,
@@ -278,7 +386,7 @@ tiles as (
     union all
 
     select
-        6 as sort_order,
+        7 as sort_order,
         'freshness' as tile_id,
         days_behind as value_number,
         null as value_weekday,

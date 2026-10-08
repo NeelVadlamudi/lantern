@@ -1,8 +1,9 @@
 # Where the MBTA subway falls behind its schedule
 
-A dbt project on public MBTA data. It compares every subway train's actual stop-to-stop run
-times and gaps between trains against the published schedule, and weights the results by
-fare-gate entries to show where it affects the most riders.
+A dbt project on public MBTA data. It compares every subway train's recorded stop-to-stop run
+times and gaps between trains against the published schedule. The headline is measured train
+time over schedule; an estimate of rider time lost, weighted by fare-gate entries, sits next to
+it.
 
 Public MBTA data. Live positions from the MBTA V3 API. Not affiliated with the MBTA.
 
@@ -43,58 +44,105 @@ Thresholds are dbt vars (`late_trip_seconds`, `long_gap_ratio`, `bunched_ratio`)
 
 ## Decision metrics
 
-These say where riders lose the most time, whether it is the schedule or the service, and what
-is getting worse. All are dbt models with contracts and tests; the headline is in
-`board_data.json` (`tiles[0]` and the `decision` block) and the detail is in Parquet.
+These say where trains lose the most time against the schedule, how much of that reaches
+riders, whether it is the schedule or the service, and what is getting worse. All are dbt
+models with contracts and tests; the headline is in `board_data.json` (`tiles[0]` and the
+`decision` block) and the detail is in Parquet. Measured values are not clamped, capped or
+dropped: where something has to be told apart (late vs early, runs over 30 minutes, terminal
+holds, gaps over 1 hour), it gets its own exact column and the totals still add up to what was
+recorded.
 
-- **Rider time lost** (main measure, `mart_station_rider_time_lost`, then
-  `mart_rider_time_lost_daily` and `mart_rider_time_lost_weekly`). Per station, line, service
-  date and service period:
+- **Train time over schedule** (headline, measured; `int_train_runs`, `mart_train_delay_daily`,
+  `mart_train_delay_summary`, tile `train_delay_weekday`). Every train run between two
+  observed stops (3,289,183 in the window) is compared with its scheduled run time:
+  - *positive excess* = max(run - scheduled, 0) per run, late time only;
+  - *net excess* = run - scheduled, so early runs offset late ones.
+  Both are summed over the runs of each service date. The headline is the average weekday,
+  with the run count and the per-run average; the all-days figures are next to it. Runs over
+  30 minutes (`travel_outlier_seconds`) are included and also given on their own. Runs that
+  cannot be compared are counted by reason and not summed: no actual time, no scheduled time,
+  actual time zero or negative (a LAMP timestamp problem), scheduled time zero or negative.
+- **Run time and terminal holds** (`int_train_runs`). LAMP gives each stop an arrival time and,
+  through the next stop's record, a departure time. The run time is arrival to arrival, except
+  on a trip's first observed stop (departure to arrival) and on runs that leave a line or
+  branch terminal (`is_terminal_departure`): there the recorded dwell at the terminal,
+  departure minus arrival, is split into `terminal_hold_seconds` and the run time is departure
+  to arrival. `actual_run_seconds` keeps the recorded arrival-to-arrival time, so
+  `actual_run_seconds = run_seconds + terminal_hold_in_actual_seconds` on every row. On runs
+  that end at a terminal (`is_terminal_arrival`) LAMP has only the arrival time, so time spent
+  holding outside the terminal cannot be split; the full time stays in the run and the segment
+  is marked `terminal_time_split = 'arrival_not_split'`. 32 of 254 segments touch a terminal
+  (16 leave one, 16 end at one).
+- **Segments** (`dim_segments`, `fct_segment_traversals`, `mart_segment_daily`,
+  `mart_segment_reliability`). A segment is two consecutive stations on a line's canonical
+  pattern in one direction; branches that share track share segments (254 segments). Each run
+  over it is a traversal from `int_train_runs`, compared or not. Geometry is the GTFS track
+  shape between the points nearest the two stations (a straight line is the fallback; all 254
+  have a shape). Segments are ranked by measured train delay: positive excess summed over
+  weekday runs, per average weekday (`avg_weekday_positive_excess_seconds`). Net excess, runs
+  over 30 minutes and terminal holds are in their own columns. The **top-10 share** is the top
+  10's weekday train delay over the sum across all segments. Riders are not used in the rank;
+  the only rider number on a segment is the people entering its start station
+  (`start_station_avg_weekday_entries`, where that station has gate data).
+- **Rider time lost** (secondary, an **estimate**; `mart_station_rider_time_lost`, then
+  `mart_rider_time_lost_daily` and `mart_rider_time_lost_weekly`). It is based on people
+  entering stations and assumes riders arrive at random times. Per station, line, service date
+  and service period:
   - *excess wait* = expected wait with the actual gaps between trains minus expected wait with
     the scheduled gaps. For someone arriving at a random time the expected wait is
-    sum(h²) / (2 · sum(h)) over the gaps h, so one long gap costs more than two short ones.
-    Both directions are pooled. Gaps over 1 hour (`wait_max_headway_seconds`) are a suspension
-    or missing data, not a wait, and are left out of both sums (1,419 of 3.1 million gaps).
-  - *excess ride* = average excess run time on the segments that start at the station, i.e. the
-    first segment after boarding. Riders usually go further, so this part is a lower bound;
+    sum(h²) / (2 · sum(h)) over the gaps h (the standard headway-based formula), so one long gap
+    costs more than two short ones. Both directions are pooled.
+  - *excess ride* = average net excess run time on the segments that start at the station, i.e.
+    the first segment after boarding. Riders usually go further, so this part is a lower bound;
     there is no origin-destination data to do better.
   - weighted by average daily gated entries for the station, line, day type and period. The
-    result is in exact rider-seconds and is an **estimate** (entries, not people).
+    result is in exact rider-seconds (entries, not people).
   - Not clamped at 0: where trains ran closer together or faster than scheduled, that offsets
     places where they ran worse, so the total is net time lost.
+  - `share_of_total_rider_time_lost` = a cell's wait + ride over the total of all cells.
   - The system total per date is the sum of the cells; the headline is the average weekday,
     with the all-days average next to it. Ungated stations (most Green Line surface stops and
     Mattapan) have no weight and add nothing. Labor Day has no weight either, because the rider
     basis window (July and August) has no holiday, so it is left out of the averages.
-- **Segments** (`dim_segments`, `fct_segment_traversals`, `mart_segment_daily`,
-  `mart_segment_reliability`). A segment is two consecutive stations on a line's canonical
-  pattern in one direction; branches that share track share segments (254 segments). Each train
-  run between them is a traversal with actual and scheduled run time. Geometry is the GTFS track
-  shape between the points nearest the two stations (a straight line is the fallback; all 254
-  have a shape). Rider-weighted loss per segment = entries at the start station × the segment's
-  share of departures from that station × its average excess, so segment losses add up to the
-  in-vehicle part of rider time lost. Segments are ranked by average weekday loss; the
-  **top-10 share** is the top 10's loss over the sum of all positive segment losses.
-- **Buffer time** (`mart_segment_reliability`, `mart_line_buffer`): p90 minus median actual run
-  time, the extra time to plan to be on time 9 times out of 10. Buffer index = buffer / median.
-  Line values are weighted by runs; they are per-segment averages, not trip totals, because
-  segment p90s do not all happen on the same trip.
+- **Gaps over 1 hour** (`fct_suspension_gaps`). 1,419 of 3,131,460 gaps between trains are over
+  `wait_max_headway_seconds` (1 hour), 10,932,746 s in all, mostly suspensions with shuttle
+  buses. They are kept in their own columns (`suspension_gap_count`, `suspension_gap_seconds`)
+  in the station, daily and weekly rider marts, `station_time_lost.parquet` and
+  `board_data.json`, and the wait is given twice: without them, and with the ones that were
+  passenger waits (`*_with_gaps`). Each gap is checked against the recorded departures at the
+  same platform (`gap_kind`):
+  - `spans_service_day_boundary`: the train that opened the gap ran on an earlier service
+    date, so the gap runs through the overnight break and is not a wait
+    (`is_passenger_wait = false`). **0 gaps**: LAMP's headways never cross a service date.
+  - `departure_recorded_inside`: other trains were recorded leaving the platform inside the
+    gap (80 gaps, 820,276 s, 569 departures). The gap is kept as a wait, split at those
+    departures: its squared term is the sum of the squared pieces
+    (`recorded_gap_squared_sum`).
+  - `departure_not_recorded`: the departure that closes the gap has no timestamp (114 gaps,
+    1,849,876 s), so it cannot be checked; kept as a wait.
+  - `no_departure_recorded_inside`: nothing recorded inside (1,225 gaps, 8,262,594 s); a wait.
+  179 gap starts do not match a departure in the files (114 of them the unrecorded kind); their
+  service date is null and they stay waits.
+- **Buffer time** (`mart_segment_reliability`, `mart_line_buffer`): p90 minus median run time,
+  the extra time to plan to be on time 9 times out of 10. Buffer index = buffer / median. Line
+  values are weighted by runs; they are per-segment averages, not trip totals, because segment
+  p90s do not all happen on the same trip.
 - **Getting worse** (`mart_segment_trend`, `mart_station_trend`): the last 14 service dates
-  against the 28 before them. Reported: the change in average excess per run (segments) or
-  per rider (stations: excess wait + excess ride pooled over each window), and the change in
-  share of rider time lost. Flagged only with at least 300 runs or departures in the recent
-  window and 600 in the prior one (about 21 a day; below that a few odd days move the average),
-  and when excess rose by at least 5 s and by at least 5 s more than the typical (median)
-  change. The whole system got slower in the recent window, so a flag means "worse than the
-  rest", not just "worse".
+  against the 28 before them. The flag uses the change in average net excess per run
+  (segments) or per rider (stations: excess wait + excess ride pooled over each window). It is
+  set only with at least 300 runs or departures in the recent window and 600 in the prior one
+  (about 21 a day; below that a few odd days move the average), and when excess rose by at
+  least 5 s and by at least 5 s more than the typical (median) change. The recent and prior
+  values, the deltas and the volumes are in the files for every row, flagged or not, along
+  with train delay per day and its share (segments) and the with-gaps values (stations).
 - **Schedule or service** (`mart_segment_reliability.cause_class`): on each date with at least
-  20 runs, the segment's average excess. Bias = median of those daily values, variability =
+  20 runs, the segment's average net excess. Bias = median of those daily values, variability =
   their interquartile range. 'schedule' if |bias| ≥ 2 × IQR (consistently off: the scheduled
   time is wrong), 'service' if IQR ≥ 2 × |bias| (fine some days, bad others), otherwise 'mixed';
   fewer than 20 such dates is 'insufficient_data'.
 
-All thresholds are dbt vars (`wait_max_headway_seconds`, `worse_*`, `cause_*`) and are listed in
-`board_data.json` under `meta.thresholds`.
+All thresholds are dbt vars (`travel_outlier_seconds`, `wait_max_headway_seconds`, `worse_*`,
+`cause_*`) and are listed in `board_data.json` under `meta.thresholds`.
 
 ### Durations
 
@@ -137,6 +185,7 @@ flowchart LR
     int_shp[int_line_shapes]
     int_rid[int_station_period_riders]
     int_st[int_gtfs_stations_as_of]
+    int_run[int_train_runs]
   end
   subgraph marts
     dims[dim_dates / dim_routes / dim_stations / dim_service_periods]
@@ -144,8 +193,8 @@ flowchart LR
     fct_t[fct_trips]
     agg[mart_line_daily / mart_period / mart_station / mart_station_daily / mart_station_overview]
     geo[mart_line_stop_sequence / mart_line_shapes]
-    seg[dim_segments / fct_segment_traversals]
-    dec[rider time lost / segment / buffer / trend marts]
+    seg[dim_segments / fct_segment_traversals / fct_suspension_gaps]
+    dec[train delay / rider time lost / segment / buffer / trend marts]
   end
   snap[[snap_gtfs_stations<br/>SCD2]]
   exports[board_* Parquet in out/]
@@ -168,7 +217,8 @@ flowchart LR
   int_st --> snap
   dims --> agg
   int_seq & int_shp & int_st --> seg
-  fct --> seg --> dec
+  fct & stg_lamp & int_seq --> int_run --> seg --> dec
+  int_run --> dec
   int_rid --> dec
   dec --> exports & payload
   agg & geo & dims --> exports --> board
@@ -182,9 +232,9 @@ The full graph, with column docs, is in the dbt docs site (`docs/dbt/index.html`
 | Layer | Models | Materialization |
 |---|---|---|
 | Staging | 9 models, one per source table: rename, cast, dedupe, parse dates. They read the remote files directly (see Loading) | LAMP: incremental; GTFS and Open Data: tables kept between builds (see Loading) |
-| Intermediate | `int_trip_stops__performance` (run times, headways, flags per arrival), `int_service_periods` (minute of day to MBTA service period), `int_line_stop_sequence`, `int_line_shapes`, `int_station_period_riders`, `int_gtfs_stations_as_of` | view, access protected |
-| Marts | `dim_dates`, `dim_routes`, `dim_stations`, `dim_service_periods`, `dim_segments`, `fct_trip_stop_events`, `fct_trips`, `fct_segment_traversals`, `mart_line_daily_reliability`, `mart_period_reliability`, `mart_station_reliability`, `mart_station_daily_reliability`, `mart_station_overview`, `mart_line_stop_sequence`, `mart_line_shapes`, `mart_data_coverage`, `mart_station_rider_time_lost`, `mart_rider_time_lost_daily`, `mart_rider_time_lost_weekly`, `mart_segment_daily`, `mart_segment_reliability`, `mart_line_buffer`, `mart_segment_trend`, `mart_station_trend` | table (fact incremental), access public, contracts enforced |
-| Exports | 15 `board_*` models written to `out/*.parquet` (zstd) for the board; `board_tiles`, `board_line_totals`, `board_payload` and `board_duration_label_cases` hold the JSON for `out/board_data.json` and `out/duration_label_cases.json` | external (Parquet); the four JSON models are tables |
+| Intermediate | `int_trip_stops__performance` (run times, headways, flags per arrival), `int_service_periods` (minute of day to MBTA service period), `int_line_stop_sequence`, `int_line_shapes`, `int_station_period_riders`, `int_gtfs_stations_as_of`, `int_train_runs` (every run between two observed stops, with the terminal split) | view (`int_train_runs`: table), access protected |
+| Marts | `dim_dates`, `dim_routes`, `dim_stations`, `dim_service_periods`, `dim_segments`, `fct_trip_stop_events`, `fct_trips`, `fct_segment_traversals`, `fct_suspension_gaps`, `mart_line_daily_reliability`, `mart_period_reliability`, `mart_station_reliability`, `mart_station_daily_reliability`, `mart_station_overview`, `mart_line_stop_sequence`, `mart_line_shapes`, `mart_data_coverage`, `mart_station_rider_time_lost`, `mart_rider_time_lost_daily`, `mart_rider_time_lost_weekly`, `mart_train_delay_daily`, `mart_train_delay_summary`, `mart_segment_daily`, `mart_segment_reliability`, `mart_line_buffer`, `mart_segment_trend`, `mart_station_trend` | table (fact incremental), access public, contracts enforced |
+| Exports | 17 `board_*` models written to `out/*.parquet` (zstd) for the board; `board_tiles`, `board_line_totals`, `board_payload` and `board_duration_label_cases` hold the JSON for `out/board_data.json` and `out/duration_label_cases.json` | external (Parquet); the four JSON models are tables |
 
 Star schema: `fct_trip_stop_events` (one row per service date, trip, route, vehicle and stop) and
 `fct_trips` (one row per train run) join to `dim_dates`, `dim_routes`, `dim_stations` and
@@ -225,8 +275,8 @@ There is no separate load step. Each source in `models/staging/_sources.yml` has
 
 ## Tests and contracts
 
-404 data tests and 3 unit tests on the full build: 395 data tests pass, 9 warn, 0 fail (plus 3
-incremental checks and 2 post-build checks that run only when their var is set, see below).
+459 data tests and 3 unit tests on the full build: 450 data tests pass, 9 warn, 0 fail (plus 3
+incremental checks and 3 post-build checks that run only when their var is set, see below).
 
 - Generic: `unique`, `not_null`, `relationships`, `accepted_values`,
   `dbt_utils.unique_combination_of_columns`, `dbt_utils.accepted_range`.
@@ -243,8 +293,12 @@ incremental checks and 2 post-build checks that run only when their var is set, 
   ungated stations have no rider rows, every map branch has its stops in order and a track shape
   inside Greater Boston, and every Parquet file listed in `board_data.json` has its model's row
   count.
-- Decision metrics (`tests/kpi/`): the rider-time-lost tile is recomputed from the facts and
-  the rider weights; daily, weekly, station and segment totals add up; the cause class, rank,
+- Decision metrics (`tests/kpi/`): the train-delay tile is recomputed from the fact table and
+  the LAMP timestamps (`kpi_train_delay_headline`), and daily and summary totals add up; every
+  run's recorded times reconcile exactly (dwell + time in motion = recorded span, actual = run
+  time + terminal hold inside it) and segment-day totals match the runs (`kpi_terminal_split`);
+  the rider-time-lost tile is recomputed from the facts and the rider weights, without and with
+  the gaps over 1 hour; daily, weekly, station and segment totals and gap counts add up; the cause class, rank,
   top-10 flag and getting-worse flags follow their rules; the `decision` block matches the
   marts; every segment geometry starts and ends within 500 m of its stations.
 - Unit tests (`models/exports/_exports.yml`): `format_duration` on the unit boundaries (59, 60,
@@ -256,7 +310,7 @@ incremental checks and 2 post-build checks that run only when their var is set, 
   `tests/assert_duration_cases_file_matches.sql`:
   `dbt test --select tag:post_build --vars '{check_build: true}'`. The exit code of
   `dbt build` is the other half of that check.
-- All 24 public marts have enforced contracts (column names and data types checked at build time).
+- All 27 public marts have enforced contracts (column names and data types checked at build time).
 
 ### Data quality findings (severity warn)
 
@@ -265,7 +319,7 @@ These come from the source data. They are kept as warnings so they show up in ev
 | Test | Rows | What it means |
 |---|---|---|
 | `accepted_range` on scheduled trunk headway (staging and fact) | 81,276 | LAMP gives a scheduled headway of 0 seconds; these arrivals are left out of gap ratios |
-| `accepted_range` on scheduled run seconds (fact) | 4,616 | Segments whose scheduled run time is zero or negative; left out of excess-time comparisons |
+| `accepted_range` on scheduled run seconds (fact) | 4,616 | Segments whose scheduled run time is zero or negative; not compared, counted in `runs_scheduled_not_positive` |
 | `assert_scheduled_run_not_negative` | 3,733 | Scheduled run time between consecutive stops is negative in LAMP |
 | `assert_trip_ids_not_reused_across_routes` | 3,539 | The same trip id appears at the same stop on more than one route on a date (1,316 also on two vehicles, 837 involve added trips). Route and vehicle are part of the fact grain, so the rows are kept |
 | `assert_travel_outliers` | 3,266 | Stop-to-stop excess over 30 minutes (disruptions, shuttles, data gaps); kept in counts, flagged in the fact |
@@ -342,7 +396,7 @@ numbers are computed in the marts and checked by the tests in `tests/kpi/`.
 ## Exposure and board files
 
 The board is declared as a dbt exposure (`reliability_board`, type application) that depends on
-the fifteen Parquet export models, `board_duration_label_cases` and `board_payload`. Exports are Parquet files in `out/` that the board queries in
+the seventeen Parquet export models, `board_duration_label_cases` and `board_payload`. Exports are Parquet files in `out/` that the board queries in
 the browser with DuckDB-WASM:
 
 | File | Grain | Size |
@@ -356,14 +410,16 @@ the browser with DuckDB-WASM:
 | `line_shapes.parquet` | branch x direction x track point | 40 KB |
 | `routes.parquet` | route | 1 KB |
 | `service_periods.parquet` | service period | 1 KB |
-| `segments.parquet` | track segment, with geometry, buffer, rider-weighted loss, rank, cause class and trend | 83 KB |
-| `rider_time_lost_daily.parquet` | service date | 8 KB |
-| `rider_time_lost_weekly.parquet` | week (Monday start) | 4 KB |
-| `station_time_lost.parquet` | station x line x day type x service period | 211 KB |
-| `station_trend.parquet` | station x line | 17 KB |
+| `segments.parquet` | track segment, with geometry, train delay (positive and net), terminal split, buffer, rank, cause class and trend | 124 KB |
+| `train_delay_daily.parquet` | service date | 10 KB |
+| `rider_time_lost_daily.parquet` | service date | 13 KB |
+| `rider_time_lost_weekly.parquet` | week (Monday start) | 6 KB |
+| `station_time_lost.parquet` | station x line x day type x service period | 398 KB |
+| `station_trend.parquet` | station x line | 38 KB |
 | `line_buffer.parquet` | line | 3 KB |
+| `suspension_gaps.parquet` | gap over 1 hour between trains at a platform | 40 KB |
 
-The six decision files store exact seconds with a label next to each time measure. The first
+The eight decision files store exact seconds with a label next to each time measure. The first
 nine files keep their rounded columns as they were, so they have no `_label` columns.
 
 `out/board_data.json` is built in dbt too. `board_tiles` (one row per headline tile),
@@ -469,28 +525,43 @@ Line figures below are over all days; time-of-day and station figures say weekda
   12,600.
 - **Freshness:** data runs through 2026-10-06, one day behind, which is LAMP's normal lag.
 
-Decision metrics (estimates; exact seconds in the files, labels as on the board):
+Decision metrics (exact seconds in the files, labels as on the board):
 
-- **Rider time lost: about 15.07 million rider-seconds on an average weekday (5 months 24 days),
-  53 s per gate entry.** 12.46 million of it is waiting (4 months 24 days) and 2.61 million is
-  riding (1 month). Over all days the average is 13.35 million (5 months 5 days). Weekly, the
-  average weekday ranged from 3 months 26 days (week of Sep 7) to 7 months 22 days (week of
-  Aug 17).
-- **The top 10 segments carry 41.5% of the in-vehicle loss across segments.** All are on the
-  Red, Blue and Orange lines (the Green Line surface has no gate data to weight it): Ashmont to
-  Shawmut 11.3%, Davis to Alewife 4.9%, South Station to Broadway 4.5%, North Quincy to
-  JFK/UMass 3.6%, Airport to Maverick 3.5%, then Maverick to Airport, North Station to
-  Haymarket, Central to Kendall/MIT, Broadway to South Station and Orient Heights to Wood
-  Island.
-- **Schedule or service:** of 254 segments, 107 are 'schedule' (consistently over or under
-  the scheduled time), 46 'service' (varies day to day), 96 'mixed', 5 with too little data.
-  Seven of the top 10 are 'schedule'.
+- **Train time over schedule (measured): on an average weekday, each run between two stops took
+  20 s longer than scheduled counting late time only, 4 s net of early runs.** Across about
+  39,632 runs a weekday (2,496,821 compared runs over 63 weekdays) that is 783,932 train-seconds
+  over schedule a weekday (9 days 2 h), 166,043 s net (1 day 22 h). Runs over 30 minutes (1,287
+  on weekdays) are 53,794 s of it a weekday (14 h 57 min). Over all days: 698,511 s a day
+  (8 days 2 h), 136,278 s net (1 day 14 h), 19 s per run. Terminal holds, shown separately:
+  843,755 s a weekday (9 days 18 h). Weekly, the average weekday ranged from 611,885 s (7 days 2 h,
+  week of Aug 10) to 878,096 s (10 days 4 h, week of Aug 17).
+- **The top 10 segments carry 14.5% of weekday train delay.** Davis to Alewife (Red,
+  5 h 12 min a weekday, ends at a terminal so outside holding stays in it), Park Street to
+  Boylston (Green, 3 h 57 min; 1 h 18 min net), Lechmere to Science Park/West End (3 h 43 min,
+  444 runs over 30 minutes), Kenmore to Hynes Convention Center (2 h 58 min), Ashmont to
+  Shawmut (Red, 2 h 39 min; terminal hold split out: 7 h 8 min a weekday), then three Blue Line
+  segments around Orient Heights and Wood Island, Arlington to Boylston (2 h 28 min late time
+  but only 6 min 54 s net) and Haymarket to Government Center.
+- **Rider time lost (estimate): about 15.55 million rider-seconds on an average weekday
+  (6 months), 55 s per gate entry.** 12.46 million of it is waiting (4 months 24 days) and 3.08
+  million is riding (1 month 6 days). With the gaps over 1 hour counted as waits: 21.56 million
+  (8 months 10 days). Over all days the average is 13.78 million (5 months 10 days), 20.13
+  million with the gaps (7 months 23 days). Weekly, the average weekday ranged from 3 months
+  27 days (week of Sep 7) to 8 months 26 days (week of Aug 17).
+- **Gaps over 1 hour:** 1,419 (996 on the Green Line). None crosses a service day, so all are
+  kept as waits; the 80 with trains recorded leaving inside them are split at those departures.
+  The longest, 68,310 s at North Station (Green, 2026-09-20), has 87 recorded departures inside;
+  its longest piece is 3,580 s.
+- **Schedule or service:** of 254 segments, 100 are 'schedule' (consistently over or under the
+  scheduled time), 48 'service' (varies day to day), 101 'mixed', 5 with too little data. Of the
+  top 10, six are 'mixed', three 'schedule' and one 'service'.
 - **Buffer index by line:** Green 0.40, Red 0.32, Blue 0.26, Mattapan 0.18, Orange 0.18.
-- **Getting worse (Sep 23 to Oct 6 against Aug 26 to Sep 22):** the system got slower overall
-  (42 to 57 s lost per entry), so the flag picks out what got worse than the rest: 42 segments
-  and 48 station-lines. Largest: Longwood Medical Area to Brigham Circle (+63 s per run),
-  Ashmont to Shawmut (+25 s), Lechmere to Union Square (+23 s); North Station on the Green Line
-  (+151 s per rider, +5.7 points of the loss share), Cleveland Circle and Union Square.
+- **Getting worse (Sep 23 to Oct 6 against Aug 26 to Sep 22):** late time per run rose from
+  18.5 s to 21.0 s across the system (net 2.7 s to 6.5 s), so the flag picks out what got worse
+  than the rest: 45 segments and 47 station-lines. Largest: Science Park/West End to Lechmere
+  (+146 s net per run), Science Park/West End to North Station (+111 s), Lechmere to Science
+  Park/West End (+109 s); stations: Science Park/West End (+170 s per rider), North Station
+  (+163 s) and Lechmere (+105 s), all on the Green Line.
 
 ## Limits
 
@@ -534,8 +605,13 @@ Other limits:
 - Schedule comparison is only as good as the scheduled values in LAMP. Added trips and the first
   stop of each trip have no scheduled run time or headway and are left out of the ratios (see the
   warn tests above).
-- The first segment of a trip uses departure-to-arrival time, because the time a train sits at
-  its origin terminal is layover, not delay.
+- The first observed segment of a trip and every run out of a terminal use departure-to-arrival
+  time; the recorded time at the terminal platform is kept in `terminal_hold_seconds`. 542
+  terminal holds are negative (LAMP records the departure before the arrival, as low as
+  -81,796 s); they are kept as recorded and counted in `terminal_hold_negative_runs`.
+- The trip-level figures above (late trips, excess per trip, line daily) are unchanged from the
+  first version: they still leave out stop-to-stop runs over 30 minutes
+  (`has_travel_comparison`). The train-delay and segment figures include those runs.
 - Rider weights use gated entries only (2026-07-07 to 2026-08-31, the latest published). 68 of 125
   stations have gated data; surface Green Line stops and Mattapan have no fare gates, so their map
   values fall back to arrival-weighted averages (`has_rider_data = false`).
@@ -549,15 +625,19 @@ Other limits:
 - Station snapshot history starts with the first 2026 GTFS archive version (2026-01-01).
 - Metrics are defined and parsed but not queried with MetricFlow (see Semantic layer).
 - Service alerts are not joined, so the project shows where and when, not why.
-- Rider time lost is an estimate: entries, not people; the ride part counts only the first
-  segment after boarding; ungated stations, transfers inside a station and the Labor Day
-  holiday have no weight; gaps over 1 hour are left out. Rider weights are from July and August.
+- Rider time lost is an estimate: entries, not people, arriving at random times; the ride part
+  counts only the first segment after boarding; ungated stations, transfers inside a station
+  and the Labor Day holiday have no weight; the gaps over 1 hour are in the with-gaps figures
+  only. Rider weights are from July and August.
 - A few trips repeat a `stop_sequence` (Mattapan and Union Square trips); traversals order
   stops by sequence, then event time. About 1.4% of compared arrivals follow a skipped or missing
   stop and are not a segment traversal.
-- Segments next to a terminal can carry terminal effects. Ashmont to Shawmut (Red, northbound)
-  ranks first: its median run is 55 s against 60 s scheduled, but about one run in ten takes
-  over 6 minutes, which looks like trains held at or just after Ashmont rather than slow running.
+- Segments that end at a terminal keep any holding outside the terminal in their run time
+  (LAMP has no timestamp for it). Davis to Alewife ranks first partly for that reason.
+- LAMP has a few rows that put a trip's first stop before its real origin (many Green Line E
+  trips toward Heath Street list Heath Street as stop 1); the terminal split handles these, as
+  the run out of the real terminal is split the same way whether or not it is the first
+  observed one.
 
 ## License
 
