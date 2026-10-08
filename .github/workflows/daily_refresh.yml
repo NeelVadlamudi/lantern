@@ -80,7 +80,7 @@ jobs:
           dbt run --profiles-dir . -s int_gtfs_stations_as_of
 
       - name: Check the build recorded no failures
-        run: dbt test --profiles-dir . --select assert_build_has_no_failures --vars '{check_build: true}'
+        run: dbt test --profiles-dir . --select tag:post_build --vars '{check_build: true}'
 
       - name: Save warehouse
         if: success()

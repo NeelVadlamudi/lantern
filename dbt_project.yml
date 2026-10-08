@@ -20,6 +20,16 @@ vars:
   travel_outlier_seconds: 1800 # a single stop-to-stop travel time above this is treated as a data error
   incremental_lookback_days: 3 # LAMP republishes recent days; reprocess this many trailing days
   rider_basis_days: 56         # days of gated entries used to estimate riders exposed
+  # Decision metrics (rider time lost, segments, trends). See README "Decision metrics".
+  wait_max_headway_seconds: 3600 # gaps over 1 hour are a suspension or missing data, not a wait; left out
+  worse_recent_days: 14        # "getting worse": the last N service dates ...
+  worse_prior_days: 28         # ... compared with the N dates before them
+  worse_min_volume_recent: 300 # flag only with at least this many train runs (segments) or departures
+  worse_min_volume_prior: 600  #   (stations) in each window, about 21 a day
+  worse_min_delta_seconds: 5   # and only if excess per train run (or per rider) rose by at least this
+  cause_min_runs_per_day: 20   # schedule-or-service split: a day counts if the segment had this many runs
+  cause_min_days: 20           # classify only segments with at least this many such days
+  cause_dominance_ratio: 2     # 'schedule' if |median daily excess| >= ratio x IQR, 'service' if IQR >= ratio x |median|
   # GTFS "as of" date (YYYYMMDD) for the station snapshot. Empty = latest loaded service date.
   gtfs_as_of: ""
 

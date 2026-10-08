@@ -1,0 +1,848 @@
+version: 2
+models:
+  - name: dim_segments
+    description: 'Track segments: pairs of consecutive stations on the canonical route pattern of a line, one direction.
+      Grain: one row per segment. Shared track between branches is one segment.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: segment_id
+        data_type: varchar
+        description: 'Surrogate key: line_id, direction_id, from_station_id, to_station_id. Joins to dim_segments.'
+        data_tests:
+          - unique
+          - not_null
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green or Blue (Green branches share one line).'
+        data_tests:
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: GTFS route id of the branch whose shape draws the segment.
+      - name: direction_id
+        data_type: integer
+        description: 'GTFS direction: 0 or 1.'
+        data_tests:
+          - not_null
+      - name: from_station_id
+        data_type: varchar
+        description: Station the segment starts at (GTFS parent station, place-*).
+        data_tests:
+          - not_null
+      - name: from_station_name
+        data_type: varchar
+        description: Name of the start station.
+      - name: to_station_id
+        data_type: varchar
+        description: Station the segment ends at (GTFS parent station, place-*).
+        data_tests:
+          - not_null
+      - name: to_station_name
+        data_type: varchar
+        description: Name of the end station.
+      - name: segment_name
+        data_type: varchar
+        description: '''<start station> to <end station>''.'
+        data_tests:
+          - not_null
+      - name: branch_route_ids
+        data_type: varchar[]
+        description: Branches (GTFS route or Red Line branch ids) that run over the segment.
+      - name: from_stop_order
+        data_type: integer
+        description: Position of the start station on the pattern (for ordering).
+      - name: geometry
+        data_type: double[][]
+        description: Track geometry as a list of [lon, lat] points (WGS84).
+        data_tests:
+          - not_null
+      - name: geometry_source
+        data_type: varchar
+        description: '''shape'' (GTFS shapes.txt slice) or ''straight_line'' (between the two stations).'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - shape
+                  - straight_line
+      - name: straight_line_meters
+        data_type: double
+        description: Great-circle distance between the two stations, meters.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - line_id
+              - direction_id
+              - from_station_id
+              - to_station_id
+  - name: fct_segment_traversals
+    description: 'One row per train run over a segment compared to the schedule. Grain: trip-stop event at the segment
+      end whose previous observed stop was the segment start.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: segment_traversal_key
+        data_type: varchar
+        description: Same as fct_trip_stop_events.trip_stop_event_key of the arrival at the end station.
+        data_tests:
+          - unique
+          - not_null
+      - name: segment_id
+        data_type: varchar
+        description: 'Surrogate key: line_id, direction_id, from_station_id, to_station_id. Joins to dim_segments.'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_segments')
+                field: segment_id
+      - name: trip_key
+        data_type: varchar
+        description: Trip key. Joins to fct_trips.
+      - name: service_date
+        data_type: date
+        description: MBTA service date. Trips after midnight belong to the previous date.
+        data_tests:
+          - not_null
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD. Joins to dim_dates.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
+      - name: service_period_id
+        data_type: varchar
+        description: MBTA service period. Joins to dim_service_periods.
+        data_tests:
+          - not_null
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green or Blue (Green branches share one line).'
+        data_tests:
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: GTFS route id of the branch whose shape draws the segment.
+      - name: branch_route_id
+        data_type: varchar
+        description: Branch the train ran on.
+      - name: direction_id
+        data_type: integer
+        description: 'GTFS direction: 0 or 1.'
+        data_tests:
+          - not_null
+      - name: from_station_id
+        data_type: varchar
+        description: Station the segment starts at (GTFS parent station, place-*).
+        data_tests:
+          - not_null
+      - name: to_station_id
+        data_type: varchar
+        description: Station the segment ends at (GTFS parent station, place-*).
+        data_tests:
+          - not_null
+      - name: actual_run_seconds
+        data_type: bigint
+        description: Actual run time over the segment, seconds.
+      - name: scheduled_run_seconds
+        data_type: bigint
+        description: Scheduled run time over the segment, seconds.
+      - name: excess_travel_seconds
+        data_type: bigint
+        description: actual_run_seconds - scheduled_run_seconds.
+  - name: mart_station_rider_time_lost
+    description: 'Estimated rider time lost beyond the schedule. Grain: station, line, service date and service
+      period. Wait = sum(h^2)/(2 sum(h)) actual minus scheduled; ride = average excess on segments starting here;
+      weighted by gated entries. Not clamped at 0.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: station_line_day_period_key
+        data_type: varchar
+        description: 'Surrogate key: station_id, line_id, date_key, service_period_id.'
+        data_tests:
+          - unique
+          - not_null
+      - name: station_id
+        data_type: varchar
+        description: GTFS parent station id (place-*). Joins to dim_stations.
+        data_tests:
+          - not_null
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green or Blue (Green branches share one line).'
+        data_tests:
+          - not_null
+      - name: service_date
+        data_type: date
+        description: MBTA service date. Trips after midnight belong to the previous date.
+        data_tests:
+          - not_null
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD. Joins to dim_dates.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
+      - name: service_period_id
+        data_type: varchar
+        description: MBTA service period. Joins to dim_service_periods.
+        data_tests:
+          - not_null
+      - name: headway_observations
+        data_type: bigint
+        description: Departures with a headway comparison and a gap of at most wait_max_headway_seconds.
+      - name: suspension_gaps
+        data_type: bigint
+        description: Gaps longer than wait_max_headway_seconds, left out of the wait sums.
+      - name: actual_headway_seconds_sum
+        data_type: double
+        description: Sum of actual gaps h, seconds. Additive.
+      - name: actual_headway_squared_sum
+        data_type: double
+        description: Sum of h^2 over actual gaps. Additive.
+      - name: scheduled_headway_seconds_sum
+        data_type: double
+        description: Sum of scheduled gaps, seconds. Additive.
+      - name: scheduled_headway_squared_sum
+        data_type: double
+        description: Sum of squared scheduled gaps. Additive.
+      - name: actual_expected_wait_seconds
+        data_type: double
+        description: 'Expected wait for a rider arriving at random with the actual gaps: sum(h^2) / (2 sum(h)).'
+      - name: scheduled_expected_wait_seconds
+        data_type: double
+        description: Same with the scheduled gaps.
+      - name: excess_wait_seconds
+        data_type: double
+        description: actual_expected_wait_seconds - scheduled_expected_wait_seconds. Signed, not clamped.
+      - name: segment_departures
+        data_type: bigint
+        description: Train runs over segments starting at this station.
+      - name: excess_ride_seconds_sum
+        data_type: bigint
+        description: Sum of excess run seconds over those runs. Additive.
+      - name: excess_ride_seconds
+        data_type: double
+        description: excess_ride_seconds_sum / segment_departures. Signed, not clamped.
+      - name: has_rider_data
+        data_type: boolean
+        description: True when a gated-entry rider weight exists; rider_* columns are null otherwise.
+        data_tests:
+          - not_null
+      - name: gated_entries
+        data_type: double
+        description: Average daily gated entries used as the rider weight.
+      - name: rider_wait_seconds_lost
+        data_type: double
+        description: Waiting part of rider_seconds_lost.
+      - name: rider_ride_seconds_lost
+        data_type: double
+        description: In-vehicle part of rider_seconds_lost (first segment after boarding).
+      - name: rider_seconds_lost
+        data_type: double
+        description: Estimated rider-seconds lost beyond the schedule (an estimate, exact, not rounded).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - station_id
+              - line_id
+              - date_key
+              - service_period_id
+  - name: mart_rider_time_lost_daily
+    description: 'System-wide estimated rider time lost per service date (sum of mart_station_rider_time_lost).
+      Grain: one row per service date.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: service_date
+        data_type: date
+        description: MBTA service date. Trips after midnight belong to the previous date.
+        data_tests:
+          - unique
+          - not_null
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD. Joins to dim_dates.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
+      - name: is_holiday
+        data_type: boolean
+        description: True on holidays (seed holidays).
+      - name: holiday_name
+        data_type: varchar
+        description: Holiday name, null on other days.
+      - name: week_start_date
+        data_type: date
+        description: Monday the week starts on.
+        data_tests:
+          - not_null
+      - name: station_cells
+        data_type: bigint
+        description: Station x line x period cells with trains that day.
+      - name: station_cells_with_riders
+        data_type: bigint
+        description: Cells with a rider weight.
+      - name: has_rider_data
+        data_type: boolean
+        description: At least one cell has a rider weight. False on a holiday when the rider basis has no holiday.
+        data_tests:
+          - not_null
+      - name: gated_entries
+        data_type: double
+        description: Average daily gated entries used as the rider weight.
+      - name: rider_wait_seconds_lost
+        data_type: double
+        description: Waiting part of rider_seconds_lost.
+      - name: rider_ride_seconds_lost
+        data_type: double
+        description: In-vehicle part of rider_seconds_lost (first segment after boarding).
+      - name: rider_seconds_lost
+        data_type: double
+        description: Estimated rider-seconds lost beyond the schedule (an estimate, exact, not rounded).
+      - name: seconds_lost_per_entry
+        data_type: double
+        description: rider_seconds_lost / gated_entries.
+  - name: mart_rider_time_lost_weekly
+    description: 'Weekly trend of estimated rider time lost. Grain: one row per week starting Monday.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: week_start_date
+        data_type: date
+        description: Monday the week starts on.
+        data_tests:
+          - unique
+          - not_null
+      - name: week_end_date
+        data_type: date
+        description: Sunday the week ends on.
+      - name: first_service_date
+        data_type: date
+        description: First loaded date in the week.
+      - name: last_service_date
+        data_type: date
+        description: Last loaded date in the week.
+      - name: service_dates
+        data_type: integer
+        description: Loaded dates in the week.
+      - name: dates_with_rider_data
+        data_type: integer
+        description: Dates with a rider weight.
+      - name: weekdays_with_rider_data
+        data_type: integer
+        description: Weekdays with a rider weight.
+      - name: is_complete_week
+        data_type: boolean
+        description: All 7 dates loaded.
+      - name: rider_seconds_lost
+        data_type: double
+        description: Estimated rider-seconds lost beyond the schedule (an estimate, exact, not rounded).
+      - name: rider_wait_seconds_lost
+        data_type: double
+        description: Waiting part of rider_seconds_lost.
+      - name: rider_ride_seconds_lost
+        data_type: double
+        description: In-vehicle part of rider_seconds_lost (first segment after boarding).
+      - name: avg_daily_rider_seconds_lost
+        data_type: double
+        description: Average rider-seconds lost per date with a rider weight.
+      - name: avg_weekday_rider_seconds_lost
+        data_type: double
+        description: Average rider-seconds lost per weekday with a rider weight.
+      - name: seconds_lost_per_entry
+        data_type: double
+        description: rider_seconds_lost / gated_entries.
+  - name: mart_segment_daily
+    description: 'Per segment and service date: excess run time and rider-weighted loss. Grain: one row per segment
+      and date.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: segment_day_key
+        data_type: varchar
+        description: 'Surrogate key: segment_id, date_key.'
+        data_tests:
+          - unique
+          - not_null
+      - name: segment_id
+        data_type: varchar
+        description: 'Surrogate key: line_id, direction_id, from_station_id, to_station_id. Joins to dim_segments.'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_segments')
+                field: segment_id
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green or Blue (Green branches share one line).'
+        data_tests:
+          - not_null
+      - name: service_date
+        data_type: date
+        description: MBTA service date. Trips after midnight belong to the previous date.
+        data_tests:
+          - not_null
+      - name: date_key
+        data_type: integer
+        description: Date as an integer YYYYMMDD. Joins to dim_dates.
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_dates')
+                field: date_key
+      - name: day_type
+        data_type: varchar
+        description: weekday, saturday, sunday or holiday.
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - weekday
+                  - saturday
+                  - sunday
+                  - holiday
+      - name: traversals
+        data_type: bigint
+        description: Train runs over the segment compared to the schedule that day.
+        data_tests:
+          - not_null
+      - name: excess_travel_seconds_sum
+        data_type: bigint
+        description: Sum of actual minus scheduled run seconds. Additive.
+      - name: avg_excess_travel_seconds
+        data_type: double
+        description: Average actual minus scheduled run seconds per train run.
+      - name: has_rider_data
+        data_type: boolean
+        description: True when a gated-entry rider weight exists; rider_* columns are null otherwise.
+        data_tests:
+          - not_null
+      - name: rider_seconds_lost
+        data_type: double
+        description: Estimated rider-seconds lost beyond the schedule (an estimate, exact, not rounded).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - segment_id
+              - date_key
+  - name: mart_segment_reliability
+    description: 'Per segment over the loaded window: excess travel, buffer time, rider-weighted loss and rank,
+      schedule-or-service class. Grain: one row per segment.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: segment_id
+        data_type: varchar
+        description: 'Surrogate key: line_id, direction_id, from_station_id, to_station_id. Joins to dim_segments.'
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_segments')
+                field: segment_id
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green or Blue (Green branches share one line).'
+        data_tests:
+          - not_null
+      - name: direction_id
+        data_type: integer
+        description: 'GTFS direction: 0 or 1.'
+        data_tests:
+          - not_null
+      - name: from_station_id
+        data_type: varchar
+        description: Station the segment starts at (GTFS parent station, place-*).
+        data_tests:
+          - not_null
+      - name: from_station_name
+        data_type: varchar
+        description: Name of the start station.
+      - name: to_station_id
+        data_type: varchar
+        description: Station the segment ends at (GTFS parent station, place-*).
+        data_tests:
+          - not_null
+      - name: to_station_name
+        data_type: varchar
+        description: Name of the end station.
+      - name: segment_name
+        data_type: varchar
+        description: '''<start station> to <end station>''.'
+        data_tests:
+          - not_null
+      - name: traversals
+        data_type: bigint
+        description: Train runs over the segment compared to the schedule.
+        data_tests:
+          - not_null
+      - name: service_dates_observed
+        data_type: integer
+        description: Dates with at least one compared run.
+      - name: excess_travel_seconds_sum
+        data_type: bigint
+        description: Sum of actual minus scheduled run seconds. Additive.
+      - name: avg_excess_travel_seconds
+        data_type: double
+        description: Average actual minus scheduled run seconds per train run.
+      - name: median_scheduled_run_seconds
+        data_type: double
+        description: Median scheduled run time, seconds.
+      - name: median_run_seconds
+        data_type: double
+        description: Median actual run time, seconds.
+      - name: p90_run_seconds
+        data_type: double
+        description: 90th percentile actual run time, seconds.
+      - name: buffer_seconds
+        data_type: double
+        description: p90_run_seconds - median_run_seconds.
+      - name: buffer_index
+        data_type: double
+        description: buffer_seconds / median_run_seconds.
+      - name: has_rider_data
+        data_type: boolean
+        description: True when a gated-entry rider weight exists; rider_* columns are null otherwise.
+        data_tests:
+          - not_null
+      - name: rider_seconds_lost
+        data_type: double
+        description: Estimated rider-seconds lost on the segment over the window (in-vehicle part).
+      - name: avg_daily_rider_seconds_lost
+        data_type: double
+        description: rider_seconds_lost / dates with a rider weight.
+      - name: avg_weekday_rider_seconds_lost
+        data_type: double
+        description: Weekday rider_seconds_lost / weekdays with a rider weight.
+      - name: loss_rank
+        data_type: integer
+        description: Rank by avg_weekday_rider_seconds_lost, highest first, among segments with rider data (ties
+          by segment_id).
+      - name: is_top_10
+        data_type: boolean
+        description: loss_rank <= 10.
+        data_tests:
+          - not_null
+      - name: share_of_segment_loss
+        data_type: double
+        description: avg_weekday_rider_seconds_lost / sum of the positive values over all segments.
+      - name: cause_days
+        data_type: integer
+        description: Dates with at least cause_min_runs_per_day runs.
+      - name: bias_seconds
+        data_type: double
+        description: Median of the daily average excess over cause_days (bias).
+      - name: daily_excess_p25_seconds
+        data_type: double
+        description: 25th percentile of the daily average excess.
+      - name: daily_excess_p75_seconds
+        data_type: double
+        description: 75th percentile of the daily average excess.
+      - name: variability_iqr_seconds
+        data_type: double
+        description: p75 - p25 of the daily average excess (variability).
+      - name: cause_class
+        data_type: varchar
+        description: schedule, service, mixed or insufficient_data (rule in the model header).
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values:
+                  - schedule
+                  - service
+                  - mixed
+                  - insufficient_data
+  - name: mart_line_buffer
+    description: 'Buffer time per line, runs-weighted over its segments. Grain: one row per line.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green or Blue (Green branches share one line).'
+        data_tests:
+          - unique
+          - not_null
+      - name: segments
+        data_type: integer
+        description: Segments with compared runs.
+      - name: traversals
+        data_type: bigint
+        description: Compared runs over those segments.
+        data_tests:
+          - not_null
+      - name: avg_segment_median_run_seconds
+        data_type: double
+        description: Runs-weighted average of segment median run time.
+      - name: avg_segment_p90_run_seconds
+        data_type: double
+        description: Runs-weighted average of segment p90 run time.
+      - name: avg_segment_buffer_seconds
+        data_type: double
+        description: Runs-weighted average segment buffer (p90 - median).
+      - name: buffer_index
+        data_type: double
+        description: sum(runs x buffer) / sum(runs x median run time).
+      - name: max_segment_buffer_seconds
+        data_type: double
+        description: Largest segment buffer on the line.
+      - name: max_buffer_segment_name
+        data_type: varchar
+        description: Segment with the largest buffer.
+  - name: mart_segment_trend
+    description: 'Getting worse per segment: last worse_recent_days dates vs the worse_prior_days before them. Grain:
+      one row per segment.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: segment_id
+        data_type: varchar
+        description: 'Surrogate key: line_id, direction_id, from_station_id, to_station_id. Joins to dim_segments.'
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_segments')
+                field: segment_id
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green or Blue (Green branches share one line).'
+        data_tests:
+          - not_null
+      - name: direction_id
+        data_type: integer
+        description: 'GTFS direction: 0 or 1.'
+        data_tests:
+          - not_null
+      - name: from_station_id
+        data_type: varchar
+        description: Station the segment starts at (GTFS parent station, place-*).
+        data_tests:
+          - not_null
+      - name: to_station_id
+        data_type: varchar
+        description: Station the segment ends at (GTFS parent station, place-*).
+        data_tests:
+          - not_null
+      - name: segment_name
+        data_type: varchar
+        description: '''<start station> to <end station>''.'
+        data_tests:
+          - not_null
+      - name: prior_start_date
+        data_type: date
+        description: First date of the prior window.
+      - name: prior_end_date
+        data_type: date
+        description: Last date of the prior window (the day before the recent window).
+      - name: recent_start_date
+        data_type: date
+        description: First date of the recent window.
+      - name: recent_end_date
+        data_type: date
+        description: Last date of the recent window (latest loaded service date).
+      - name: runs_recent
+        data_type: bigint
+        description: Compared runs in the recent window.
+      - name: runs_prior
+        data_type: bigint
+        description: Compared runs in the prior window.
+      - name: avg_excess_seconds_recent
+        data_type: double
+        description: Average excess per run, recent window.
+      - name: avg_excess_seconds_prior
+        data_type: double
+        description: Average excess per run, prior window.
+      - name: delta_excess_seconds
+        data_type: double
+        description: avg_excess_seconds_recent - avg_excess_seconds_prior.
+      - name: avg_daily_rider_seconds_lost_recent
+        data_type: double
+        description: Average daily rider-seconds lost, recent window.
+      - name: avg_daily_rider_seconds_lost_prior
+        data_type: double
+        description: Average daily rider-seconds lost, prior window.
+      - name: delta_daily_rider_seconds_lost
+        data_type: double
+        description: Average daily rider-seconds lost, recent minus prior.
+      - name: loss_share_recent
+        data_type: double
+        description: Share of the positive average daily rider time lost of all rows in the recent window.
+      - name: loss_share_prior
+        data_type: double
+        description: Same share in the prior window.
+      - name: loss_share_change
+        data_type: double
+        description: loss_share_recent - loss_share_prior.
+      - name: meets_volume_threshold
+        data_type: boolean
+        description: Cleared both minimum-volume thresholds (worse_min_volume_recent, worse_min_volume_prior).
+        data_tests:
+          - not_null
+      - name: typical_delta_excess_seconds
+        data_type: double
+        description: Median delta_excess_seconds over the rows that clear the volume threshold.
+      - name: is_getting_worse
+        data_type: boolean
+        description: Volume threshold cleared and delta_excess_seconds >= worse_min_delta_seconds and >= typical
+          delta + worse_min_delta_seconds.
+        data_tests:
+          - not_null
+  - name: mart_station_trend
+    description: 'Getting worse per station and line: last worse_recent_days dates vs the worse_prior_days before
+      them. Grain: one row per station and line.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: station_line_key
+        data_type: varchar
+        description: 'Surrogate key: station_id, line_id.'
+        data_tests:
+          - unique
+          - not_null
+      - name: station_id
+        data_type: varchar
+        description: GTFS parent station id (place-*). Joins to dim_stations.
+        data_tests:
+          - not_null
+      - name: station_name
+        data_type: varchar
+        description: Station name.
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line: Red, Mattapan, Orange, Green or Blue (Green branches share one line).'
+        data_tests:
+          - not_null
+      - name: prior_start_date
+        data_type: date
+        description: First date of the prior window.
+      - name: prior_end_date
+        data_type: date
+        description: Last date of the prior window (the day before the recent window).
+      - name: recent_start_date
+        data_type: date
+        description: First date of the recent window.
+      - name: recent_end_date
+        data_type: date
+        description: Last date of the recent window (latest loaded service date).
+      - name: departures_recent
+        data_type: bigint
+        description: Departures with a headway comparison, recent window.
+      - name: departures_prior
+        data_type: bigint
+        description: Same, prior window.
+      - name: excess_seconds_per_rider_recent
+        data_type: double
+        description: Excess wait + excess ride per rider, pooled over the recent window.
+      - name: excess_seconds_per_rider_prior
+        data_type: double
+        description: Same, prior window.
+      - name: delta_excess_seconds
+        data_type: double
+        description: excess_seconds_per_rider_recent - excess_seconds_per_rider_prior.
+      - name: avg_daily_rider_seconds_lost_recent
+        data_type: double
+        description: Average daily rider-seconds lost, recent window.
+      - name: avg_daily_rider_seconds_lost_prior
+        data_type: double
+        description: Average daily rider-seconds lost, prior window.
+      - name: delta_daily_rider_seconds_lost
+        data_type: double
+        description: Average daily rider-seconds lost, recent minus prior.
+      - name: loss_share_recent
+        data_type: double
+        description: Share of the positive average daily rider time lost of all rows in the recent window.
+      - name: loss_share_prior
+        data_type: double
+        description: Same share in the prior window.
+      - name: loss_share_change
+        data_type: double
+        description: loss_share_recent - loss_share_prior.
+      - name: meets_volume_threshold
+        data_type: boolean
+        description: Cleared both minimum-volume thresholds (worse_min_volume_recent, worse_min_volume_prior).
+        data_tests:
+          - not_null
+      - name: typical_delta_excess_seconds
+        data_type: double
+        description: Median delta_excess_seconds over the rows that clear the volume threshold.
+      - name: is_getting_worse
+        data_type: boolean
+        description: Volume threshold cleared and delta_excess_seconds >= worse_min_delta_seconds and >= typical
+          delta + worse_min_delta_seconds.
+        data_tests:
+          - not_null
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns:
+              - station_id
+              - line_id

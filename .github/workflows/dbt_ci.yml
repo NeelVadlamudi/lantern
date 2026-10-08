@@ -55,7 +55,7 @@ jobs:
           dbt build --profiles-dir . --vars '{use_sample: true, lamp_end_date: 2026-08-28, check_incremental: true}'
 
       - name: Check the build recorded no failures
-        run: dbt test --profiles-dir . --select assert_build_has_no_failures --vars '{use_sample: true, check_build: true}'
+        run: dbt test --profiles-dir . --select tag:post_build --vars '{use_sample: true, check_build: true}'
 
       - name: Docs
         run: dbt docs generate --profiles-dir . --static --target-path target_docs --vars '{use_sample: true}'

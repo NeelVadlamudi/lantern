@@ -63,3 +63,21 @@ seeds:
         data_tests:
           - unique
           - not_null
+  - name: duration_label_boundaries
+    description: >
+      Durations in seconds at every unit boundary of format_duration and around each rounding
+      step. board_duration_label_cases labels them and the hook writes
+      out/duration_label_cases.json for the board's own formatter to be tested against.
+    config:
+      column_types:
+        sort_order: integer
+        seconds: double
+    columns:
+      - name: sort_order
+        data_tests:
+          - unique
+          - not_null
+      - name: seconds
+        data_tests:
+          - unique
+          - not_null

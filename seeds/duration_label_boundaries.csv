@@ -1,0 +1,32 @@
+sort_order,seconds,case_name
+1,0,zero
+2,1,one second
+3,55,seconds only
+4,59,last whole second under one minute
+5,59.4,fraction under a half is cut
+6,59.5,half a second rounds up and carries to one minute
+7,60,one minute
+8,61,minute and second
+9,89,minute and seconds
+10,119,just under two minutes: nothing cut so no rounding
+11,3599,last second under one hour: nothing cut so no rounding
+12,3600,one hour
+13,3629,1 h 0 min 29 s: seconds under a half are cut
+14,3630,1 h 0 min 30 s: half a minute rounds up
+15,3655,1 h 0 min 55 s rounds to 1 h 1 min
+16,3660,hour and minute
+17,3750,1 h 2 min 30 s rounds half up to 1 h 3 min
+18,86379,23 h 59 min 39 s carries to one day
+19,86380,23 h 59 min 40 s carries to one day
+20,86399,last second under one day
+21,86400,one day
+22,88199,1 day 0 h 29 min 59 s
+23,88200,1 day 0 h 30 min rounds half up to 1 day 1 h
+24,172800,two days
+25,2591999,last second under one month (30 days) carries to one month
+26,2592000,one month (30 days)
+27,2635200,30.5 days: half a day rounds up to 1 month 1 day
+28,31535999,last second under one year (365 days) carries to one year
+29,31536000,one year (365 days)
+30,32832000,1 year 15 days: half a month rounds up to 1 year 1 month
+31,61430400,1 year 346 days: 11.5 months round up to 12 and carry to 2 years

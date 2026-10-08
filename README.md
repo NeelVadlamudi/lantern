@@ -41,6 +41,79 @@ weekdays only. Day types come from `dim_dates`; holidays are a seed and are list
 
 Thresholds are dbt vars (`late_trip_seconds`, `long_gap_ratio`, `bunched_ratio`).
 
+## Decision metrics
+
+These say where riders lose the most time, whether it is the schedule or the service, and what
+is getting worse. All are dbt models with contracts and tests; the headline is in
+`board_data.json` (`tiles[0]` and the `decision` block) and the detail is in Parquet.
+
+- **Rider time lost** (main measure, `mart_station_rider_time_lost`, then
+  `mart_rider_time_lost_daily` and `mart_rider_time_lost_weekly`). Per station, line, service
+  date and service period:
+  - *excess wait* = expected wait with the actual gaps between trains minus expected wait with
+    the scheduled gaps. For someone arriving at a random time the expected wait is
+    sum(h²) / (2 · sum(h)) over the gaps h, so one long gap costs more than two short ones.
+    Both directions are pooled. Gaps over 1 hour (`wait_max_headway_seconds`) are a suspension
+    or missing data, not a wait, and are left out of both sums (1,419 of 3.1 million gaps).
+  - *excess ride* = average excess run time on the segments that start at the station, i.e. the
+    first segment after boarding. Riders usually go further, so this part is a lower bound;
+    there is no origin-destination data to do better.
+  - weighted by average daily gated entries for the station, line, day type and period. The
+    result is in exact rider-seconds and is an **estimate** (entries, not people).
+  - Not clamped at 0: where trains ran closer together or faster than scheduled, that offsets
+    places where they ran worse, so the total is net time lost.
+  - The system total per date is the sum of the cells; the headline is the average weekday,
+    with the all-days average next to it. Ungated stations (most Green Line surface stops and
+    Mattapan) have no weight and add nothing. Labor Day has no weight either, because the rider
+    basis window (July and August) has no holiday, so it is left out of the averages.
+- **Segments** (`dim_segments`, `fct_segment_traversals`, `mart_segment_daily`,
+  `mart_segment_reliability`). A segment is two consecutive stations on a line's canonical
+  pattern in one direction; branches that share track share segments (254 segments). Each train
+  run between them is a traversal with actual and scheduled run time. Geometry is the GTFS track
+  shape between the points nearest the two stations (a straight line is the fallback; all 254
+  have a shape). Rider-weighted loss per segment = entries at the start station × the segment's
+  share of departures from that station × its average excess, so segment losses add up to the
+  in-vehicle part of rider time lost. Segments are ranked by average weekday loss; the
+  **top-10 share** is the top 10's loss over the sum of all positive segment losses.
+- **Buffer time** (`mart_segment_reliability`, `mart_line_buffer`): p90 minus median actual run
+  time, the extra time to plan to be on time 9 times out of 10. Buffer index = buffer / median.
+  Line values are weighted by runs; they are per-segment averages, not trip totals, because
+  segment p90s do not all happen on the same trip.
+- **Getting worse** (`mart_segment_trend`, `mart_station_trend`): the last 14 service dates
+  against the 28 before them. Reported: the change in average excess per run (segments) or
+  per rider (stations: excess wait + excess ride pooled over each window), and the change in
+  share of rider time lost. Flagged only with at least 300 runs or departures in the recent
+  window and 600 in the prior one (about 21 a day; below that a few odd days move the average),
+  and when excess rose by at least 5 s and by at least 5 s more than the typical (median)
+  change. The whole system got slower in the recent window, so a flag means "worse than the
+  rest", not just "worse".
+- **Schedule or service** (`mart_segment_reliability.cause_class`): on each date with at least
+  20 runs, the segment's average excess. Bias = median of those daily values, variability =
+  their interquartile range. 'schedule' if |bias| ≥ 2 × IQR (consistently off: the scheduled
+  time is wrong), 'service' if IQR ≥ 2 × |bias| (fine some days, bad others), otherwise 'mixed';
+  fewer than 20 such dates is 'insufficient_data'.
+
+All thresholds are dbt vars (`wait_max_headway_seconds`, `worse_*`, `cause_*`) and are listed in
+`board_data.json` under `meta.thresholds`.
+
+### Durations
+
+Times are stored in exact seconds. Every exported time measure has `<metric>_seconds` and
+`<metric>_label`; labels come from the `format_duration` macro:
+
+- two largest units: `55 s`, `1 min 29 s`, `1 h 3 min`, `2 days 4 h`, `3 months 10 days`,
+  `1 year 2 months`; 1 month = 30 days, 1 year = 365 days; day, month and year are singular
+  for 1; a zero second unit is dropped (`1 h`, `2 days`).
+- rounding: only what is cut below the second unit is rounded, to the nearest second unit,
+  halves up, and a full unit carries upward. 119 s stays `1 min 59 s` and 3599 s stays
+  `59 min 59 s` (nothing is cut), 3655 s is `1 h 1 min`, 3750 s (1 h 2 min 30 s) is `1 h 3 min`,
+  86380 s (23 h 59 min 40 s) is `1 day`, 1 day 0 h 30 min is `1 day 1 h`. Fractions of a second
+  count as the cut part (59.5 s is `1 min`). At the year level 12 months carry into a year.
+- `out/duration_label_cases.json` is an array of `{seconds, label}` from the macro: every unit
+  boundary and rounding step (seed `duration_label_boundaries`) plus a few large real values
+  from the marts. The board's own formatter is tested against it. dbt unit tests check the
+  macro on the same cases, and a post-build test checks the file matches the model.
+
 ## Lineage
 
 ```mermaid
@@ -71,10 +144,12 @@ flowchart LR
     fct_t[fct_trips]
     agg[mart_line_daily / mart_period / mart_station / mart_station_daily / mart_station_overview]
     geo[mart_line_stop_sequence / mart_line_shapes]
+    seg[dim_segments / fct_segment_traversals]
+    dec[rider time lost / segment / buffer / trend marts]
   end
   snap[[snap_gtfs_stations<br/>SCD2]]
   exports[board_* Parquet in out/]
-  payload[board_tiles / board_line_totals / board_payload<br/>on-run-end: out/board_data.json]
+  payload[board_tiles / board_line_totals / board_payload / board_duration_label_cases<br/>on-run-end: out/board_data.json, out/duration_label_cases.json]
   board{{reliability board}}
   seeds[/seeds: service periods, holidays, branches, display names/]
 
@@ -92,6 +167,10 @@ flowchart LR
   int_shp --> geo
   int_st --> snap
   dims --> agg
+  int_seq & int_shp & int_st --> seg
+  fct --> seg --> dec
+  int_rid --> dec
+  dec --> exports & payload
   agg & geo & dims --> exports --> board
   agg & geo & dims & exports --> payload --> board
 ```
@@ -104,8 +183,8 @@ The full graph, with column docs, is in the dbt docs site (`docs/dbt/index.html`
 |---|---|---|
 | Staging | 9 models, one per source table: rename, cast, dedupe, parse dates. They read the remote files directly (see Loading) | LAMP: incremental; GTFS and Open Data: tables kept between builds (see Loading) |
 | Intermediate | `int_trip_stops__performance` (run times, headways, flags per arrival), `int_service_periods` (minute of day to MBTA service period), `int_line_stop_sequence`, `int_line_shapes`, `int_station_period_riders`, `int_gtfs_stations_as_of` | view, access protected |
-| Marts | `dim_dates`, `dim_routes`, `dim_stations`, `dim_service_periods`, `fct_trip_stop_events`, `fct_trips`, `mart_line_daily_reliability`, `mart_period_reliability`, `mart_station_reliability`, `mart_station_daily_reliability`, `mart_station_overview`, `mart_line_stop_sequence`, `mart_line_shapes`, `mart_data_coverage` | table (fact incremental), access public, contracts enforced |
-| Exports | 9 `board_*` models written to `out/*.parquet` (zstd) for the board; `board_tiles`, `board_line_totals` and `board_payload` hold the JSON for `out/board_data.json` | external (Parquet); the three JSON models are tables |
+| Marts | `dim_dates`, `dim_routes`, `dim_stations`, `dim_service_periods`, `dim_segments`, `fct_trip_stop_events`, `fct_trips`, `fct_segment_traversals`, `mart_line_daily_reliability`, `mart_period_reliability`, `mart_station_reliability`, `mart_station_daily_reliability`, `mart_station_overview`, `mart_line_stop_sequence`, `mart_line_shapes`, `mart_data_coverage`, `mart_station_rider_time_lost`, `mart_rider_time_lost_daily`, `mart_rider_time_lost_weekly`, `mart_segment_daily`, `mart_segment_reliability`, `mart_line_buffer`, `mart_segment_trend`, `mart_station_trend` | table (fact incremental), access public, contracts enforced |
+| Exports | 15 `board_*` models written to `out/*.parquet` (zstd) for the board; `board_tiles`, `board_line_totals`, `board_payload` and `board_duration_label_cases` hold the JSON for `out/board_data.json` and `out/duration_label_cases.json` | external (Parquet); the four JSON models are tables |
 
 Star schema: `fct_trip_stop_events` (one row per service date, trip, route, vehicle and stop) and
 `fct_trips` (one row per train run) join to `dim_dates`, `dim_routes`, `dim_stations` and
@@ -146,8 +225,8 @@ There is no separate load step. Each source in `models/staging/_sources.yml` has
 
 ## Tests and contracts
 
-288 data tests on the full build: 279 pass, 9 warn, 0 fail (plus 3 incremental checks and 1
-post-build check that run only when their var is set, see below).
+404 data tests and 3 unit tests on the full build: 395 data tests pass, 9 warn, 0 fail (plus 3
+incremental checks and 2 post-build checks that run only when their var is set, see below).
 
 - Generic: `unique`, `not_null`, `relationships`, `accepted_values`,
   `dbt_utils.unique_combination_of_columns`, `dbt_utils.accepted_range`.
@@ -164,13 +243,20 @@ post-build check that run only when their var is set, see below).
   ungated stations have no rider rows, every map branch has its stops in order and a track shape
   inside Greater Boston, and every Parquet file listed in `board_data.json` has its model's row
   count.
+- Decision metrics (`tests/kpi/`): the rider-time-lost tile is recomputed from the facts and
+  the rider weights; daily, weekly, station and segment totals add up; the cause class, rank,
+  top-10 flag and getting-worse flags follow their rules; the `decision` block matches the
+  marts; every segment geometry starts and ends within 500 m of its stations.
+- Unit tests (`models/exports/_exports.yml`): `format_duration` on the unit boundaries (59, 60,
+  3599, 3600, 86399, 86400 s, 30 days, 365 days), on the rounding rule, and on real values.
 - Build result: the on-run-end hook stores every node's result in `audit.build_results`, and
   writes `out/board_data.json` only if no model or test errored or failed (otherwise the previous
   file stays). `tests/assert_build_has_no_failures.sql` reads that table; a test cannot see the
-  invocation it runs in, so it runs right after the build:
-  `dbt test --select assert_build_has_no_failures --vars '{check_build: true}'`. The exit code of
+  invocation it runs in, so it runs right after the build, together with
+  `tests/assert_duration_cases_file_matches.sql`:
+  `dbt test --select tag:post_build --vars '{check_build: true}'`. The exit code of
   `dbt build` is the other half of that check.
-- All 14 public marts have enforced contracts (column names and data types checked at build time).
+- All 24 public marts have enforced contracts (column names and data types checked at build time).
 
 ### Data quality findings (severity warn)
 
@@ -256,7 +342,7 @@ numbers are computed in the marts and checked by the tests in `tests/kpi/`.
 ## Exposure and board files
 
 The board is declared as a dbt exposure (`reliability_board`, type application) that depends on
-the nine `board_*` export models and `board_payload`. Exports are Parquet files in `out/` that the board queries in
+the fifteen Parquet export models, `board_duration_label_cases` and `board_payload`. Exports are Parquet files in `out/` that the board queries in
 the browser with DuckDB-WASM:
 
 | File | Grain | Size |
@@ -270,18 +356,27 @@ the browser with DuckDB-WASM:
 | `line_shapes.parquet` | branch x direction x track point | 40 KB |
 | `routes.parquet` | route | 1 KB |
 | `service_periods.parquet` | service period | 1 KB |
+| `segments.parquet` | track segment, with geometry, buffer, rider-weighted loss, rank, cause class and trend | 83 KB |
+| `rider_time_lost_daily.parquet` | service date | 8 KB |
+| `rider_time_lost_weekly.parquet` | week (Monday start) | 4 KB |
+| `station_time_lost.parquet` | station x line x day type x service period | 211 KB |
+| `station_trend.parquet` | station x line | 17 KB |
+| `line_buffer.parquet` | line | 3 KB |
+
+The six decision files store exact seconds with a label next to each time measure. The first
+nine files keep their rounded columns as they were, so they have no `_label` columns.
 
 `out/board_data.json` is built in dbt too. `board_tiles` (one row per headline tile),
 `board_line_totals` (one row per route) and `board_payload` (one row, one JSON column per block:
 meta, tiles, lines, worst stations, worst periods, map with stations, ordered stop lists, track
-shapes and period values, files, data coverage, glossary) are DuckDB tables built with
+shapes and period values, files, data coverage, decision, glossary) are DuckDB tables built with
 `json_object` and lists. Glossary and source text are seeds (`board_glossary`, `board_sources`).
 The on-run-end hook (`macros/write_build_outputs.sql`) adds the `build` block, put together in
 Jinja from the run's `results` (totals by status and by resource type, test counts, warned
 tests) and the project `graph` (models by layer, contracted, incremental and external models,
 lineage edges), and COPYs the row to `out/board_data.json`. It also writes
 `out/build_results.json` (unique_id, resource_type, name, status, execution_time, failures,
-message for every node). Both are written only when `board_payload` was built in that
+message for every node) and `out/duration_label_cases.json`. They are written only when `board_payload` was built in that
 invocation and nothing errored or failed, so a partial run such as `dbt build -s board_payload`
 gives a build block that covers only that run.
 
@@ -319,7 +414,7 @@ dbt build --profiles-dir . --full-refresh --vars '{use_sample: true}'
 dbt build --profiles-dir . --vars '{refresh_reference: true}'
 
 # check the last build had no failures
-dbt test --profiles-dir . --select assert_build_has_no_failures --vars '{check_build: true}'
+dbt test --profiles-dir . --select tag:post_build --vars '{check_build: true}'
 
 # docs (single static file, opens from disk)
 dbt docs generate --profiles-dir . --static --target-path target_docs
@@ -373,6 +468,29 @@ Line figures below are over all days; time-of-day and station figures say weekda
   36.5% of the time, rider-weighted), South Station 2,000 of 10,800, Downtown Crossing 1,900 of
   12,600.
 - **Freshness:** data runs through 2026-10-06, one day behind, which is LAMP's normal lag.
+
+Decision metrics (estimates; exact seconds in the files, labels as on the board):
+
+- **Rider time lost: about 15.07 million rider-seconds on an average weekday (5 months 24 days),
+  53 s per gate entry.** 12.46 million of it is waiting (4 months 24 days) and 2.61 million is
+  riding (1 month). Over all days the average is 13.35 million (5 months 5 days). Weekly, the
+  average weekday ranged from 3 months 26 days (week of Sep 7) to 7 months 22 days (week of
+  Aug 17).
+- **The top 10 segments carry 41.5% of the in-vehicle loss across segments.** All are on the
+  Red, Blue and Orange lines (the Green Line surface has no gate data to weight it): Ashmont to
+  Shawmut 11.3%, Davis to Alewife 4.9%, South Station to Broadway 4.5%, North Quincy to
+  JFK/UMass 3.6%, Airport to Maverick 3.5%, then Maverick to Airport, North Station to
+  Haymarket, Central to Kendall/MIT, Broadway to South Station and Orient Heights to Wood
+  Island.
+- **Schedule or service:** of 254 segments, 107 are 'schedule' (consistently over or under
+  the scheduled time), 46 'service' (varies day to day), 96 'mixed', 5 with too little data.
+  Seven of the top 10 are 'schedule'.
+- **Buffer index by line:** Green 0.40, Red 0.32, Blue 0.26, Mattapan 0.18, Orange 0.18.
+- **Getting worse (Sep 23 to Oct 6 against Aug 26 to Sep 22):** the system got slower overall
+  (42 to 57 s lost per entry), so the flag picks out what got worse than the rest: 42 segments
+  and 48 station-lines. Largest: Longwood Medical Area to Brigham Circle (+63 s per run),
+  Ashmont to Shawmut (+25 s), Lechmere to Union Square (+23 s); North Station on the Green Line
+  (+151 s per rider, +5.7 points of the loss share), Cleveland Circle and Union Square.
 
 ## Limits
 
@@ -431,6 +549,15 @@ Other limits:
 - Station snapshot history starts with the first 2026 GTFS archive version (2026-01-01).
 - Metrics are defined and parsed but not queried with MetricFlow (see Semantic layer).
 - Service alerts are not joined, so the project shows where and when, not why.
+- Rider time lost is an estimate: entries, not people; the ride part counts only the first
+  segment after boarding; ungated stations, transfers inside a station and the Labor Day
+  holiday have no weight; gaps over 1 hour are left out. Rider weights are from July and August.
+- A few trips repeat a `stop_sequence` (Mattapan and Union Square trips); traversals order
+  stops by sequence, then event time. About 1.4% of compared arrivals follow a skipped or missing
+  stop and are not a segment traversal.
+- Segments next to a terminal can carry terminal effects. Ashmont to Shawmut (Red, northbound)
+  ranks first: its median run is 55 s against 60 s scheduled, but about one run in ten takes
+  over 6 minutes, which looks like trains held at or just after Ashmont rather than slow running.
 
 ## License
 

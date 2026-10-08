@@ -8,6 +8,13 @@
 -- depends_on: {{ ref('board_line_shapes') }}
 -- depends_on: {{ ref('board_service_periods') }}
 -- depends_on: {{ ref('board_routes') }}
+-- depends_on: {{ ref('board_segments') }}
+-- depends_on: {{ ref('board_rider_time_lost_daily') }}
+-- depends_on: {{ ref('board_rider_time_lost_weekly') }}
+-- depends_on: {{ ref('board_station_time_lost') }}
+-- depends_on: {{ ref('board_station_trend') }}
+-- depends_on: {{ ref('board_line_buffer') }}
+-- depends_on: {{ ref('board_duration_label_cases') }}
 -- Board summary: one row, one JSON column per top-level block of board_data.json. The
 -- on-run-end hook (macros/write_build_outputs.sql) adds the `build` block and COPYs this row
 -- to out/board_data.json. Runs after every Parquet export so `files` lists what was written.
@@ -91,7 +98,16 @@ meta as (
                 'late_trip_seconds', {{ var('late_trip_seconds') }},
                 'long_gap_ratio', cast({{ var('long_gap_ratio') }} as double),
                 'bunched_ratio', cast({{ var('bunched_ratio') }} as double),
-                'travel_outlier_seconds', {{ var('travel_outlier_seconds') }}
+                'travel_outlier_seconds', {{ var('travel_outlier_seconds') }},
+                'wait_max_headway_seconds', {{ var('wait_max_headway_seconds') }},
+                'worse_recent_days', {{ var('worse_recent_days') }},
+                'worse_prior_days', {{ var('worse_prior_days') }},
+                'worse_min_volume_recent', {{ var('worse_min_volume_recent') }},
+                'worse_min_volume_prior', {{ var('worse_min_volume_prior') }},
+                'worse_min_delta_seconds', {{ var('worse_min_delta_seconds') }},
+                'cause_min_runs_per_day', {{ var('cause_min_runs_per_day') }},
+                'cause_min_days', {{ var('cause_min_days') }},
+                'cause_dominance_ratio', cast({{ var('cause_dominance_ratio') }} as double)
             ),
             'method', 'Actual arrival-to-arrival times between stops are compared to the published'
             || ' schedule for every subway train, and actual gaps between trains to scheduled gaps.'
@@ -580,6 +596,218 @@ data_coverage as (
     cross join green_events
 ),
 
+-- decision metrics (rider time lost, segments, buffer, getting worse, schedule or service) ---
+
+rider_headline as (
+    select tile from {{ ref('board_tiles') }}
+    where tile_id = 'rider_time_lost'
+),
+
+rider_weekly as (
+    select
+        to_json(list(
+            json_object(
+                'week_start', strftime(week_start_date, '%Y-%m-%d'),
+                'week_end', strftime(week_end_date, '%Y-%m-%d'),
+                'service_dates', service_dates,
+                'is_complete_week', is_complete_week,
+                'avg_daily_seconds', avg_daily_rider_time_lost_seconds,
+                'avg_daily_label', avg_daily_rider_time_lost_label,
+                'avg_weekday_seconds', avg_weekday_rider_time_lost_seconds,
+                'avg_weekday_label', avg_weekday_rider_time_lost_label,
+                'per_entry_seconds', time_lost_per_entry_seconds,
+                'per_entry_label', time_lost_per_entry_label
+            )
+            order by week_start_date
+        )) as weeks
+    from {{ ref('board_rider_time_lost_weekly') }}
+),
+
+top_segment_rows as (
+    select * from {{ ref('board_segments') }}
+    where is_top_10
+),
+
+top_segments as (
+    select
+        to_json(list(
+            json_object(
+                'rank', loss_rank,
+                'segment_id', segment_id,
+                'segment_name', segment_name,
+                'line_id', line_id,
+                'direction_id', direction_id,
+                'from_station_id', from_station_id,
+                'to_station_id', to_station_id,
+                'avg_weekday_rider_time_lost_seconds', avg_weekday_rider_time_lost_seconds,
+                'avg_weekday_rider_time_lost_label', avg_weekday_rider_time_lost_label,
+                'share_of_segment_loss', share_of_segment_loss,
+                'avg_excess_travel_seconds', avg_excess_travel_seconds,
+                'avg_excess_travel_label', avg_excess_travel_label,
+                'buffer_seconds', buffer_seconds,
+                'buffer_label', buffer_label,
+                'buffer_index', buffer_index,
+                'cause_class', cause_class
+            )
+            order by loss_rank
+        )) as segments,
+        sum(avg_weekday_rider_time_lost_seconds) as top_10_seconds
+    from top_segment_rows
+),
+
+segment_totals as (
+    select
+        sum(greatest(avg_weekday_rider_time_lost_seconds, 0)) as positive_segment_seconds,
+        count(*) as segments,
+        count(*) filter (where has_rider_data) as segments_with_rider_data
+    from {{ ref('board_segments') }}
+),
+
+cause_counts as (
+    select to_json(map_from_entries(list((cause_class, n) order by cause_class))) as counts
+    from (
+        select
+            cause_class,
+            count(*) as n
+        from {{ ref('board_segments') }}
+        group by cause_class
+    ) as per_class
+),
+
+worse_segments as (
+    select
+        to_json(list(
+            json_object(
+                'segment_id', segment_id,
+                'segment_name', segment_name,
+                'line_id', line_id,
+                'direction_id', direction_id,
+                'runs_recent', runs_recent,
+                'runs_prior', runs_prior,
+                'delta_excess_seconds', delta_excess_seconds,
+                'delta_excess_label', delta_excess_label,
+                'loss_share_change', loss_share_change
+            )
+            order by delta_excess_seconds desc, segment_id asc
+        )) as segments
+    from {{ ref('board_segments') }}
+    where is_getting_worse
+),
+
+worse_stations as (
+    select
+        to_json(list(
+            json_object(
+                'station_id', station_id,
+                'station_name', station_name,
+                'line_id', line_id,
+                'departures_recent', departures_recent,
+                'departures_prior', departures_prior,
+                'delta_excess_seconds', delta_excess_seconds,
+                'delta_excess_label', delta_excess_label,
+                'loss_share_change', loss_share_change
+            )
+            order by delta_excess_seconds desc, station_id asc, line_id asc
+        )) as stations
+    from {{ ref('board_station_trend') }}
+    where is_getting_worse
+),
+
+trend_window as (
+    select
+        any_value(prior_start_date) as prior_start_date,
+        any_value(prior_end_date) as prior_end_date,
+        any_value(recent_start_date) as recent_start_date,
+        any_value(recent_end_date) as recent_end_date,
+        any_value(typical_delta_excess_seconds) as station_typical_delta_seconds
+    from {{ ref('board_station_trend') }}
+),
+
+segment_typical as (
+    select any_value(typical_delta_excess_seconds) as typical_delta_excess_seconds
+    from {{ ref('mart_segment_trend') }}
+),
+
+line_order as (
+    select
+        line_id,
+        min(display_order) as display_order
+    from {{ ref('dim_routes') }}
+    group by line_id
+),
+
+line_buffers as (
+    select
+        to_json(list(
+            json_object(
+                'line_id', line_buffer.line_id,
+                'avg_segment_buffer_seconds', line_buffer.avg_segment_buffer_seconds,
+                'avg_segment_buffer_label', line_buffer.avg_segment_buffer_label,
+                'buffer_index', line_buffer.buffer_index,
+                'max_segment_buffer_seconds', line_buffer.max_segment_buffer_seconds,
+                'max_segment_buffer_label', line_buffer.max_segment_buffer_label,
+                'max_buffer_segment_name', line_buffer.max_buffer_segment_name
+            )
+            order by line_order.display_order
+        )) as line_buffer_list
+    from {{ ref('board_line_buffer') }} as line_buffer
+    inner join line_order on line_buffer.line_id = line_order.line_id
+),
+
+decision as (
+    select
+        json_object(
+            'rider_time_lost', json_object(
+                'headline', rider_headline.tile,
+                'is_estimate', true,
+                'clamped_at_zero', false,
+                'clamp_note', 'Not clamped: cells where trains ran closer together or faster than'
+                || ' scheduled offset cells where they ran slower, so this is net time lost.',
+                'weekly', coalesce(rider_weekly.weeks, json('[]'))
+            ),
+            'segments', json_object(
+                'segments', segment_totals.segments,
+                'segments_with_rider_data', segment_totals.segments_with_rider_data,
+                'top_10', coalesce(top_segments.segments, json('[]')),
+                'top_10_share_of_segment_loss',
+                top_segments.top_10_seconds / nullif(segment_totals.positive_segment_seconds, 0),
+                'top_10_share_rule', 'Average weekday rider-weighted loss of the 10 top segments divided'
+                || ' by the sum of the positive losses of all segments (in-vehicle time only).'
+            ),
+            'line_buffer', coalesce(line_buffers.line_buffer_list, json('[]')),
+            'cause_counts', cause_counts.counts,
+            'getting_worse', json_object(
+                'prior_window', json_object(
+                    'first', strftime(trend_window.prior_start_date, '%Y-%m-%d'),
+                    'last', strftime(trend_window.prior_end_date, '%Y-%m-%d')
+                ),
+                'recent_window', json_object(
+                    'first', strftime(trend_window.recent_start_date, '%Y-%m-%d'),
+                    'last', strftime(trend_window.recent_end_date, '%Y-%m-%d')
+                ),
+                'segment_typical_delta_seconds', segment_typical.typical_delta_excess_seconds,
+                'station_typical_delta_seconds', trend_window.station_typical_delta_seconds,
+                'rule', 'Flagged when there were at least {{ var("worse_min_volume_recent") }} train runs'
+                || ' (segments) or departures (stations) in the recent window and'
+                || ' {{ var("worse_min_volume_prior") }} in the prior window, and excess time rose by at'
+                || ' least {{ var("worse_min_delta_seconds") }} s and by at least'
+                || ' {{ var("worse_min_delta_seconds") }} s more than the typical (median) change.',
+                'segments', coalesce(worse_segments.segments, json('[]')),
+                'stations', coalesce(worse_stations.stations, json('[]'))
+            )
+        ) as decision
+    from rider_headline
+    cross join rider_weekly
+    cross join top_segments
+    cross join segment_totals
+    cross join cause_counts
+    cross join worse_segments
+    cross join worse_stations
+    cross join trend_window
+    cross join segment_typical
+    cross join line_buffers
+),
+
 glossary as (
     select to_json(list(json_object('term', term, 'meaning', meaning) order by sort_order)) as glossary
     from {{ ref('board_glossary') }}
@@ -596,6 +824,7 @@ select
     map_block.map,
     coalesce(files.files, json('[]')) as files,
     data_coverage.coverage,
+    decision.decision,
     coalesce(glossary.glossary, json('[]')) as glossary
 from meta
 cross join tiles
@@ -605,4 +834,5 @@ cross join worst_periods
 cross join map_block
 cross join files
 cross join data_coverage
+cross join decision
 cross join glossary

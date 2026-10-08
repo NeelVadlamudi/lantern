@@ -180,7 +180,7 @@ models:
           - not_null
           - accepted_values:
               arguments:
-                values: [late_trip_share, avg_trip_excess_seconds, long_gap_share, weekday_entries_in_long_gaps, worst_line, freshness]
+                values: [rider_time_lost, late_trip_share, avg_trip_excess_seconds, long_gap_share, weekday_entries_in_long_gaps, worst_line, freshness]
       - name: tile
         data_tests:
           - not_null
@@ -190,8 +190,204 @@ models:
     data_tests:
       - dbt_utils.expression_is_true:
           arguments:
-            expression: "json_array_length(tiles) = 6 and json_array_length(lines) = 8"
+            expression: "json_array_length(tiles) = 7 and json_array_length(lines) = 8"
     columns:
       - name: meta
         data_tests:
           - not_null
+
+  - name: board_segments
+    description: "Parquet file out/segments.parquet. Grain: one row per track segment, with geometry. Time measures as <metric>_seconds (exact) and <metric>_label (format_duration)."
+    columns:
+      - name: segment_id
+        data_tests:
+          - unique
+          - not_null
+      - name: geometry
+        description: Track geometry as [lon, lat] points; at least two points (checked by kpi_segment_geometry).
+        data_tests:
+          - not_null
+
+  - name: board_rider_time_lost_daily
+    description: "Parquet file out/rider_time_lost_daily.parquet. Grain: one row per service date."
+    columns:
+      - name: service_date
+        data_tests:
+          - unique
+          - not_null
+
+  - name: board_rider_time_lost_weekly
+    description: "Parquet file out/rider_time_lost_weekly.parquet. Grain: one row per week starting Monday."
+    columns:
+      - name: week_start_date
+        data_tests:
+          - unique
+          - not_null
+
+  - name: board_station_time_lost
+    description: "Parquet file out/station_time_lost.parquet. Grain: one row per station, line, day type and service period."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [station_id, line_id, day_type, service_period_id]
+
+  - name: board_station_trend
+    description: "Parquet file out/station_trend.parquet. Grain: one row per station and line."
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [station_id, line_id]
+
+  - name: board_line_buffer
+    description: "Parquet file out/line_buffer.parquet. Grain: one row per line."
+    columns:
+      - name: line_id
+        data_tests:
+          - unique
+          - not_null
+
+  - name: board_duration_label_cases
+    description: >-
+      Seconds and the format_duration label for every unit boundary (seed duration_label_boundaries)
+      and a few large real values from the marts. The on-run-end hook writes seconds and label to
+      out/duration_label_cases.json, which the board's own formatter is tested against.
+    columns:
+      - name: sort_order
+        data_tests:
+          - unique
+          - not_null
+      - name: label
+        data_tests:
+          - not_null
+
+unit_tests:
+  - name: format_duration_unit_boundaries
+    description: The unit boundaries named in the spec, including 30 days (1 month) and 365 days (1 year).
+    model: board_duration_label_cases
+    given:
+      - input: ref('duration_label_boundaries')
+        format: csv
+        rows: |
+          sort_order,seconds,case_name
+          1,59,a
+          2,60,b
+          3,3599,c
+          4,3600,d
+          5,86399,e
+          6,86400,f
+          7,2592000,g
+          8,31536000,h
+      - input: ref('mart_rider_time_lost_daily')
+        rows: []
+      - input: ref('mart_rider_time_lost_weekly')
+        rows: []
+      - input: ref('mart_segment_reliability')
+        rows: []
+    expect:
+      format: csv
+      rows: |
+        sort_order,seconds,label
+        1,59,59 s
+        2,60,1 min
+        3,3599,59 min 59 s
+        4,3600,1 h
+        5,86399,1 day
+        6,86400,1 day
+        7,2592000,1 month
+        8,31536000,1 year
+
+  - name: format_duration_rounding_rule
+    description: >-
+      Two largest units; only what is cut below the second unit is rounded (to nearest, halves up)
+      and carried; a zero second unit is dropped. Same at the day, month and year levels.
+    model: board_duration_label_cases
+    given:
+      - input: ref('duration_label_boundaries')
+        format: csv
+        rows: |
+          sort_order,seconds,case_name
+          1,0,a
+          2,1,a
+          3,55,a
+          4,59.4,a
+          5,59.5,a
+          6,61,a
+          7,89,a
+          8,119,a
+          9,3599,a
+          10,3629,a
+          11,3630,a
+          12,3655,a
+          13,3660,a
+          14,3750,a
+          15,86380,a
+          16,88199,a
+          17,88200,a
+          18,172800,a
+          19,2591999,a
+          20,2635200,a
+          21,31535999,a
+          22,32832000,a
+          23,61430400,a
+          24,-61,a
+          25,-0.4,a
+      - input: ref('mart_rider_time_lost_daily')
+        rows: []
+      - input: ref('mart_rider_time_lost_weekly')
+        rows: []
+      - input: ref('mart_segment_reliability')
+        rows: []
+    expect:
+      format: csv
+      rows: |
+        sort_order,seconds,label
+        1,0,0 s
+        2,1,1 s
+        3,55,55 s
+        4,59.4,59 s
+        5,59.5,1 min
+        6,61,1 min 1 s
+        7,89,1 min 29 s
+        8,119,1 min 59 s
+        9,3599,59 min 59 s
+        10,3629,1 h
+        11,3630,1 h 1 min
+        12,3655,1 h 1 min
+        13,3660,1 h 1 min
+        14,3750,1 h 3 min
+        15,86380,1 day
+        16,88199,1 day
+        17,88200,1 day 1 h
+        18,172800,2 days
+        19,2591999,1 month
+        20,2635200,1 month 1 day
+        21,31535999,1 year
+        22,32832000,1 year 1 month
+        23,61430400,2 years
+        24,-61,-1 min 1 s
+        25,-0.4,0 s
+
+  - name: format_duration_real_values
+    description: Real values from the marts are added after the boundaries, with their fractions.
+    model: board_duration_label_cases
+    given:
+      - input: ref('duration_label_boundaries')
+        rows: []
+      - input: ref('mart_rider_time_lost_daily')
+        rows:
+          - {day_type: weekday, has_rider_data: true, rider_seconds_lost: 15067751.88}
+          - {day_type: sunday, has_rider_data: true, rider_seconds_lost: 7261142.33}
+      - input: ref('mart_rider_time_lost_weekly')
+        rows:
+          - {week_start_date: 2026-08-17, rider_seconds_lost: 121732461.82}
+      - input: ref('mart_segment_reliability')
+        rows:
+          - {segment_id: a, loss_rank: 1, avg_weekday_rider_seconds_lost: 438216.99}
+          - {segment_id: b, loss_rank: 2, avg_weekday_rider_seconds_lost: 190266.0}
+    expect:
+      rows:
+        - {sort_order: 101, case_source: mart, label: 5 months 24 days}
+        - {sort_order: 102, case_source: mart, label: 4 months 9 days}
+        - {sort_order: 103, case_source: mart, label: 8 months 18 days}
+        - {sort_order: 104, case_source: mart, label: 3 years 10 months}
+        - {sort_order: 105, case_source: mart, label: 5 days 2 h}

@@ -9,7 +9,8 @@
        message. tests/assert_build_has_no_failures.sql reads that table.
     2. When this invocation built board_payload and nothing errored or failed, it also writes
        <out>/build_results.json (the same rows) and <out>/board_data.json: the board_payload row
-       plus a `build` block put together here from `results` and the project `graph`.
+       plus a `build` block put together here from `results` and the project `graph`, and
+       <out>/duration_label_cases.json (seconds and label from board_duration_label_cases).
        A failed model or test therefore leaves the previous board_data.json in place.
 -#}
 {% macro write_build_outputs(results) %}
@@ -221,10 +222,23 @@
                 files,
                 json('{{ tojson(build) | replace("'", "''") }}') as build,
                 coverage,
+                decision,
                 glossary
             from {{ payload }}
         ) to '{{ out_dir }}/board_data.json' (format json);
     {%- endcall -%}
     {%- do log("wrote " ~ out_dir ~ "/board_data.json and " ~ out_dir ~ "/build_results.json", info=true) -%}
+    {%- set cases_node = models.get('model.' ~ project_name ~ '.board_duration_label_cases') -%}
+    {%- if cases_node -%}
+        {%- set cases = api.Relation.create(
+            database=cases_node.database, schema=cases_node.schema, identifier=cases_node.alias
+        ) -%}
+        {%- call statement('write_duration_cases') -%}
+            copy (
+                select seconds, label from {{ cases }} order by sort_order
+            ) to '{{ out_dir }}/duration_label_cases.json' (format json, array true);
+        {%- endcall -%}
+        {%- do log("wrote " ~ out_dir ~ "/duration_label_cases.json", info=true) -%}
+    {%- endif -%}
     {{ return('select 1') }}
 {% endmacro %}
