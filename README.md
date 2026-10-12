@@ -586,7 +586,7 @@ Decision metrics (exact seconds in the files, labels as on the board):
   same measure on the 28 most recent earlier dates of the same day type (fewer early in the
   window; `typical_days` says how many). `line_day_metrics.parquet`, `day_worst_segments.parquet`
   and `day_worst_stations.parquet` have the same for every date.
-- **Charts.** `line_hour_heatmap.parquet` and `station_hour_heatmap.parquet` (hour x date, Boston
+- **Charts.** `line_hour_heatmap.parquet` and `station_hour_heatmap_<line>.parquet` (one file per line; hour x date, Boston
   time), `delay_histogram.parquet` (1-minute bins of per-trip and per-run excess, open bins below
   -15 and at 30 minutes or more) and `train_delay_by_line.parquet` (each line's share of positive
   train delay). Heatmap hours are rated worse / about / better than usual against the p25 to p75

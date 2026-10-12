@@ -91,3 +91,4 @@ snapshots:
 
 flags:
   require_generic_test_arguments_property: true
+  send_anonymous_usage_stats: false  # no usage tracking calls, and no tracking script in the docs page

@@ -31,6 +31,7 @@ concurrency:
 
 env:
   MBTA_DUCKDB_PATH: warehouse/mbta.duckdb
+  DBT_SEND_ANONYMOUS_USAGE_STATS: "False"
 
 jobs:
   build:
@@ -127,7 +128,14 @@ jobs:
       - name: Docs
         if: steps.outcome.outputs.good == 'true'
         run: |
-          dbt docs generate --profiles-dir . --static --target-path target_docs
+          # Generated from a copy at /lantern: the page embeds the project's root path, and the
+          # runner's home path would fail the leak scan.
+          sudo mkdir -p /lantern && sudo chown "$(id -u)" /lantern
+          rsync -a --exclude .git --exclude target --exclude target_docs ./ /lantern/
+          (cd /lantern && dbt docs generate --profiles-dir . --static --target-path target_docs)
+          bash scripts/strip_docs_tracker.sh /lantern/target_docs/static_index.html
+          mkdir -p target_docs
+          cp /lantern/target_docs/static_index.html target_docs/static_index.html
           mkdir -p docs/dbt
           cp target_docs/static_index.html docs/dbt/index.html
 

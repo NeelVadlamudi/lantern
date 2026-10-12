@@ -1306,7 +1306,7 @@ survey as (
 
 charts as (
     select json_object(
-        'heatmap_files', ['line_hour_heatmap.parquet', 'station_hour_heatmap.parquet'],
+        'heatmap_files', ['line_hour_heatmap.parquet'],
         'station_heatmap_files_by_line', json_object(
             'Red', 'station_hour_heatmap_red.parquet',
             'Orange', 'station_hour_heatmap_orange.parquet',

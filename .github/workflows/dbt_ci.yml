@@ -20,6 +20,7 @@ concurrency:
 
 env:
   MBTA_DUCKDB_PATH: warehouse/ci.duckdb
+  DBT_SEND_ANONYMOUS_USAGE_STATS: "False"
 
 jobs:
   build:
@@ -67,4 +68,9 @@ jobs:
 
       - name: Docs
         run: |
-          dbt docs generate --profiles-dir . --static --target-path target_docs --vars '{use_sample: true}'
+          # Generated from a copy at /lantern, as in the daily refresh (the page embeds the root path).
+          sudo mkdir -p /lantern && sudo chown "$(id -u)" /lantern
+          rsync -a --exclude .git --exclude target --exclude target_docs ./ /lantern/
+          (cd /lantern && dbt docs generate --profiles-dir . --static --target-path target_docs --vars '{use_sample: true}')
+          bash scripts/strip_docs_tracker.sh /lantern/target_docs/static_index.html
+          bash scripts/leak_scan.sh /lantern/target_docs/static_index.html

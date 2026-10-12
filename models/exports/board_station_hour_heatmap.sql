@@ -1,12 +1,10 @@
-{{
-    config(
-        location=env_var('MBTA_OUT_DIR', 'out') ~ '/station_hour_heatmap.parquet'
-    )
-}}
--- Board file for the hour x date heatmap per station (mart_station_hour_heatmap). Grain: one row
+{{ config(materialized='table') }}
+-- Rows for the per-station hour x date heatmap (mart_station_hour_heatmap), kept as a table in
+-- the exports schema and not written as a file: the page loads one line at a time from the
+-- station_hour_heatmap_<line>.parquet files built from it (station_heatmap_for_line). Grain: one row
 -- per station, line, service date and service hour. Train delay counts runs arriving at the
 -- station; gaps count departures from it. usual_* flags as in line_hour_heatmap.
--- The hash surrogate key is left out of the file; the grain columns identify each row.
+-- The hash surrogate key is left out; the grain columns identify each row.
 
 select
     heatmap.* exclude (station_hour_key),  -- noqa: RF02

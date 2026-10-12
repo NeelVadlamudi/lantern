@@ -114,9 +114,29 @@ exported as (
     from {{ ref('board_line_hour_heatmap') }}
     union all
     select
-        'station_hour_heatmap.parquet' as file_name,
+        'station_hour_heatmap_blue.parquet' as file_name,
         count(*) as n_rows
-    from {{ ref('board_station_hour_heatmap') }}
+    from {{ ref('board_station_hour_heatmap_blue') }}
+    union all
+    select
+        'station_hour_heatmap_green.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_station_hour_heatmap_green') }}
+    union all
+    select
+        'station_hour_heatmap_mattapan.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_station_hour_heatmap_mattapan') }}
+    union all
+    select
+        'station_hour_heatmap_orange.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_station_hour_heatmap_orange') }}
+    union all
+    select
+        'station_hour_heatmap_red.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_station_hour_heatmap_red') }}
     union all
     select
         'delay_histogram.parquet' as file_name,

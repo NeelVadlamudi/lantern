@@ -289,15 +289,15 @@ models:
   - name: board_line_day_completeness
     description: "Parquet file out/line_day_completeness.parquet. Grain: one row per scope and service date: trips scheduled (GTFS), observed and compared, completeness share and the low-completeness flag."
   - name: board_station_hour_heatmap_red
-    description: "Parquet file out/station_hour_heatmap_red.parquet. The station_hour_heatmap.parquet rows for one line, so the page loads only the picked line."
+    description: "Parquet file out/station_hour_heatmap_red.parquet. The board_station_hour_heatmap rows for one line, so the page loads only the picked line."
   - name: board_station_hour_heatmap_orange
-    description: "Parquet file out/station_hour_heatmap_orange.parquet. The station_hour_heatmap.parquet rows for one line, so the page loads only the picked line."
+    description: "Parquet file out/station_hour_heatmap_orange.parquet. The board_station_hour_heatmap rows for one line, so the page loads only the picked line."
   - name: board_station_hour_heatmap_blue
-    description: "Parquet file out/station_hour_heatmap_blue.parquet. The station_hour_heatmap.parquet rows for one line, so the page loads only the picked line."
+    description: "Parquet file out/station_hour_heatmap_blue.parquet. The board_station_hour_heatmap rows for one line, so the page loads only the picked line."
   - name: board_station_hour_heatmap_green
-    description: "Parquet file out/station_hour_heatmap_green.parquet. The station_hour_heatmap.parquet rows for one line, so the page loads only the picked line."
+    description: "Parquet file out/station_hour_heatmap_green.parquet. The board_station_hour_heatmap rows for one line, so the page loads only the picked line."
   - name: board_station_hour_heatmap_mattapan
-    description: "Parquet file out/station_hour_heatmap_mattapan.parquet. The station_hour_heatmap.parquet rows for one line, so the page loads only the picked line."
+    description: "Parquet file out/station_hour_heatmap_mattapan.parquet. The board_station_hour_heatmap rows for one line, so the page loads only the picked line."
   - name: board_line_day_metrics
     description: "Parquet file out/line_day_metrics.parquet. Grain: one row per scope (system or route), service date and measure, with the typical value for the same day type and the difference. For the date filter."
   - name: board_day_worst_segments
@@ -307,7 +307,7 @@ models:
   - name: board_line_hour_heatmap
     description: "Parquet file out/line_hour_heatmap.parquet. Grain: one row per scope, service date and service hour (mart_line_hour_heatmap plus scope_name)."
   - name: board_station_hour_heatmap
-    description: "Parquet file out/station_hour_heatmap.parquet. Grain: one row per station, line, service date and service hour (mart_station_hour_heatmap plus station_name)."
+    description: "Table only (no file): the source of the station_hour_heatmap_<line>.parquet files. Grain: one row per station, line, service date and service hour (mart_station_hour_heatmap plus station_name)."
   - name: board_delay_histogram
     description: "Parquet file out/delay_histogram.parquet. Grain: one row per kind, scope, service date and non-empty 1-minute bin."
   - name: board_train_delay_by_line
