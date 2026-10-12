@@ -1642,7 +1642,7 @@ models:
         description: Same, prior window.
       - name: loss_share_recent
         data_type: double
-        description: Share of the positive average daily rider time lost of all rows in the recent window.
+        description: The row's average daily rider time lost over the sum of all rows in the recent window. Signed, not clamped; the shares sum to 1.
       - name: loss_share_prior
         data_type: double
         description: Same share in the prior window.
@@ -1672,3 +1672,77 @@ models:
             combination_of_columns:
               - station_id
               - line_id
+
+  - name: mart_segment_concentration
+    description: 'Terminal hold distribution and the worst window of consecutive days per track segment. Grain: one row
+      per segment with compared runs. Shares are the window''s train delay (positive excess) and compared runs over the
+      segment''s totals for the loaded window.'
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: segment_id
+        data_type: varchar
+        description: Joins to dim_segments.
+        data_tests:
+          - unique
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_segments')
+                field: segment_id
+      - name: traversals
+        data_type: bigint
+        description: Compared runs over the loaded window (mart_segment_daily.traversals summed).
+        data_tests:
+          - not_null
+      - name: positive_excess_seconds_sum
+        data_type: bigint
+        description: Train delay (positive excess) summed over the loaded window, seconds.
+        data_tests:
+          - not_null
+      - name: terminal_hold_runs
+        data_type: bigint
+        description: Runs with a recorded terminal hold (0 when the segment does not start at a terminal).
+        data_tests:
+          - not_null
+      - name: terminal_hold_median_seconds
+        data_type: double
+        description: Median recorded terminal hold per run, seconds (quantile_cont; negative holds included as recorded).
+      - name: terminal_hold_p90_seconds
+        data_type: double
+        description: 90th percentile recorded terminal hold per run, seconds (quantile_cont).
+      - name: terminal_hold_mean_seconds
+        data_type: double
+        description: Mean recorded terminal hold per run, seconds. Equals mart_segment_reliability.avg_terminal_hold_seconds.
+      - name: worst_window_days
+        data_type: integer
+        description: Length of the window in calendar days (var worst_window_days).
+      - name: worst_window_start_date
+        data_type: date
+        description: First day of the window with the largest share of the segment's train delay (ties - earliest).
+      - name: worst_window_end_date
+        data_type: date
+        description: Last day of that window (start + worst_window_days - 1).
+      - name: worst_window_positive_excess_seconds_sum
+        data_type: bigint
+        description: Train delay in the worst window, seconds.
+      - name: worst_window_traversals
+        data_type: bigint
+        description: Compared runs in the worst window.
+      - name: worst_window_share_of_delay
+        data_type: double
+        description: worst_window_positive_excess_seconds_sum / positive_excess_seconds_sum.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: worst_window_share_of_runs
+        data_type: double
+        description: worst_window_traversals / traversals.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1

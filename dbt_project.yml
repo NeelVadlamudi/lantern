@@ -24,6 +24,7 @@ vars:
   wait_max_headway_seconds: 3600 # gaps over 1 hour (usually suspensions): kept in their own columns, wait shown with and without them
   worse_recent_days: 14        # "getting worse": the last N service dates ...
   worse_prior_days: 28         # ... compared with the N dates before them
+  worst_window_days: 14        # worst window: the N consecutive calendar days with the largest share of a segment's train delay
   worse_min_volume_recent: 300 # flag only with at least this many train runs (segments) or departures
   worse_min_volume_prior: 600  #   (stations) in each window, about 21 a day
   worse_min_delta_seconds: 5   # and only if excess per train run (or per rider) rose by at least this

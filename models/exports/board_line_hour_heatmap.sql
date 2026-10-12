@@ -8,9 +8,10 @@
 -- midnight of the service date, so 24 to 27 are after midnight). Every rate carries its
 -- numerator and denominator; the usual_* flags compare the hour with the same hour on the
 -- earlier var('typical_days') days of the same day type (see meta.thresholds).
+-- The hash surrogate key is left out of the file; the grain columns identify each row.
 
 select
-    heatmap.*,
+    heatmap.* exclude (line_hour_key),  -- noqa: RF02
     coalesce(routes.display_name, 'All subway lines') as scope_name
 from {{ ref('mart_line_hour_heatmap') }} as heatmap
 left join {{ ref('dim_routes') }} as routes on heatmap.scope_id = routes.route_id

@@ -11,7 +11,9 @@
 -- runs offset slower ones. Ranked by train_delay_weekday_seconds. The only rider number is
 -- start_station_avg_weekday_entries: people entering the start station, not riders on the segment.
 -- On terminal departures the train delay is in-motion time over schedule; the recorded time on
--- the terminal platform before leaving is terminal_hold_* (not part of the delay).
+-- the terminal platform before leaving is terminal_hold_* (not part of the delay): mean, median and
+-- p90 per run. worst_window_* is the run of worst_window_days calendar days with the largest share
+-- of the segment's train delay (mart_segment_concentration).
 
 select
     segments.segment_id,
@@ -57,6 +59,19 @@ select
     reliability.avg_weekday_terminal_hold_seconds as terminal_hold_weekday_seconds,
     {{ format_duration('reliability.avg_weekday_terminal_hold_seconds') }} as terminal_hold_weekday_label,
     reliability.terminal_hold_negative_seconds_sum,
+    concentration.terminal_hold_median_seconds,
+    {{ format_duration('concentration.terminal_hold_median_seconds') }} as terminal_hold_median_label,
+    concentration.terminal_hold_p90_seconds,
+    {{ format_duration('concentration.terminal_hold_p90_seconds') }} as terminal_hold_p90_label,
+    concentration.terminal_hold_mean_seconds,
+    {{ format_duration('concentration.terminal_hold_mean_seconds') }} as terminal_hold_mean_label,
+    concentration.worst_window_days,
+    concentration.worst_window_start_date,
+    concentration.worst_window_end_date,
+    concentration.worst_window_positive_excess_seconds_sum,
+    concentration.worst_window_traversals,
+    concentration.worst_window_share_of_delay,
+    concentration.worst_window_share_of_runs,
     reliability.weekday_terminal_hold_negative_runs,
     reliability.avg_weekday_terminal_hold_negative_seconds as terminal_hold_weekday_negative_seconds,
     reliability.median_scheduled_run_seconds,
@@ -115,4 +130,5 @@ select
 from {{ ref('dim_segments') }} as segments
 inner join {{ ref('mart_segment_reliability') }} as reliability on segments.segment_id = reliability.segment_id
 inner join {{ ref('mart_segment_trend') }} as trend on segments.segment_id = trend.segment_id
+left join {{ ref('mart_segment_concentration') }} as concentration on segments.segment_id = concentration.segment_id
 order by segments.line_id, segments.direction_id, segments.from_stop_order, segments.segment_id

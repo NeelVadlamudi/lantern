@@ -5,8 +5,10 @@
 --     scheduled), ride from the summed segment excess / segment departures. It does not need
 --     gate data, so ungated stations have it too.
 --   delta_excess_seconds = excess per rider, recent minus prior.
---   loss share = the station-line's average daily rider time lost as a share of the positive
---     losses of all station-lines in the same window; share_change = recent - prior.
+--   loss share = the station-line's average daily rider time lost / the sum over all station-lines
+--     in the same window. Not clamped: a station-line with net negative time lost (trains beat the
+--     schedule) has a negative share, and the shares sum to 1 (as in board_station_time_lost);
+--     share_change = recent - prior.
 --   is_getting_worse = clears the volume threshold (at least var('worse_min_volume_recent')
 --     departures in the recent window and var('worse_min_volume_prior') in the prior window, about
 --     21 a day; below that a few odd days move the average), the delta is at least
@@ -172,9 +174,9 @@ shared as (
     select
         *,
         avg_daily_rider_seconds_lost_recent
-        / nullif(sum(greatest(avg_daily_rider_seconds_lost_recent, 0)) over (), 0) as loss_share_recent,
+        / nullif(sum(avg_daily_rider_seconds_lost_recent) over (), 0) as loss_share_recent,
         avg_daily_rider_seconds_lost_prior
-        / nullif(sum(greatest(avg_daily_rider_seconds_lost_prior, 0)) over (), 0) as loss_share_prior
+        / nullif(sum(avg_daily_rider_seconds_lost_prior) over (), 0) as loss_share_prior
     from per_station
 
 ),

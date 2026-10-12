@@ -72,6 +72,22 @@ worst_late as (
     limit 1
 ),
 
+runner_up_late as (
+    select * from {{ ref('board_line_totals') }}
+    order by late_trip_share desc, display_order asc
+    limit 1 offset 1
+),
+
+late_margin as (
+    select
+        worst_late.late_trip_share - runner_up_late.late_trip_share as margin_share,
+        (worst_late.late_trips + runner_up_late.late_trips)
+        / (worst_late.trips_compared + runner_up_late.trips_compared) as pooled_share,
+        1 / worst_late.trips_compared + 1 / runner_up_late.trips_compared as inverse_trips
+    from worst_late
+    cross join runner_up_late
+),
+
 worst_gap as (
     select * from {{ ref('board_line_totals') }}
     order by long_gap_share desc, display_order asc
@@ -415,6 +431,19 @@ tiles as (
             'display', worst_late.display_name,
             'metric_value', {{ board_round('worst_late.late_trip_share', 4) }},
             'metric_display', printf('%.1f%%', 100 * worst_late.late_trip_share),
+            'metric_value_exact', worst_late.late_trip_share,
+            'late_trips', worst_late.late_trips,
+            'trips_compared', worst_late.trips_compared,
+            'runner_up_value', runner_up_late.route_id,
+            'runner_up_display', runner_up_late.display_name,
+            'runner_up_metric_value_exact', runner_up_late.late_trip_share,
+            'runner_up_late_trips', runner_up_late.late_trips,
+            'runner_up_trips_compared', runner_up_late.trips_compared,
+            'margin_share', late_margin.margin_share,
+            -- two-proportion z with the pooled share, trips treated as independent (trips on one day
+            -- share causes, so they are not fully): read it as an upper bound on how clear the gap is
+            'margin_z', late_margin.margin_share
+            / sqrt(late_margin.pooled_share * (1 - late_margin.pooled_share) * late_margin.inverse_trips),
             'sentence', worst_late.display_name || ' had the highest share of trips 5+ minutes late over all'
             || ' days (' || printf('%.1f%%', 100 * worst_late.late_trip_share) || ').',
             'explainer', 'Over all days, ' || worst_late.display_name
@@ -426,6 +455,8 @@ tiles as (
             || printf('%.1f%%', 100 * worst_gap.long_gap_share) || ').'
         ) as tile
     from worst_late
+    cross join runner_up_late
+    cross join late_margin
     cross join worst_relative
     cross join worst_gap
 

@@ -85,7 +85,12 @@ recorded.
   have a shape). Segments are ranked by measured train delay: positive excess summed over
   weekday runs, per average weekday (`avg_weekday_positive_excess_seconds`). Net excess, runs
   over 30 minutes and terminal holds are in their own columns. The **top-10 share** is the top
-  10's weekday train delay over the sum across all segments. Riders are not used in the rank;
+  10's weekday train delay over the sum across all segments. Per segment,
+  `mart_segment_concentration` adds the distribution of terminal holds (median, p90 and mean
+  per run, as recorded) and the **worst 14-day window** (`worst_window_days`): of every run of
+  14 consecutive calendar days inside the loaded dates, the one holding the largest share of the
+  segment's train delay, with that share and the window's share of the segment's compared runs.
+  Riders are not used in the rank;
   the only rider number on a segment is the people entering its start station
   (`start_station_avg_weekday_entries`, where that station has gate data).
 - **Rider time lost** (secondary, an **estimate**; `mart_station_rider_time_lost`, then
@@ -509,7 +514,9 @@ Weekdays exclude holidays (Labor Day, 2026-09-07, is the one holiday in the wind
 Line figures below are over all days; time-of-day and station figures say weekday where they are.
 
 - **Green Line D is most often late: 21.02% of its trips are 5+ minutes over (5,007 of 23,817),
-  just ahead of Red at 21.00% (7,804 of 37,163).** D averages 183.6 s over per trip, 6.6% of
+  just ahead of Red at 21.00% (7,804 of 37,163).** The gap is 0.02 percentage points (a pooled
+  two-proportion z of 0.07, with trips treated as independent), so the two are tied on this
+  measure; the tile carries the runner-up, its counts and the margin. D averages 183.6 s over per trip, 6.6% of
   scheduled time; 1,622 of its trips include a stop-to-stop run over 30 minutes, and without those
   runs D is 15.3% late. Red averages 151.9 s over per trip (6.6%); without runs over 30 minutes
   Red is 20.9% late and 145.5 s over.
@@ -545,7 +552,9 @@ Decision metrics (exact seconds in the files, labels as on the board):
   5 h 12 min a weekday, ends at a terminal so outside holding stays in it), Park Street to
   Boylston (Green, 3 h 57 min; 1 h 18 min net), Lechmere to Science Park/West End (3 h 43 min,
   444 runs over 30 minutes), Kenmore to Hynes Convention Center (2 h 58 min), Ashmont to
-  Shawmut (Red, 2 h 39 min; terminal hold split out: 7 h 8 min a weekday), then three Blue Line
+  Shawmut (Red, 2 h 39 min; terminal hold split out: 7 h 8 min a weekday; per run the hold is
+  169 s at the median, 503 s at p90 and 244.8 s on average over 8,941 runs; Jul 20 to Aug 2
+  holds 34.3% of its train delay with 13.6% of its runs), then three Blue Line
   segments around Orient Heights and Wood Island, Arlington to Boylston (2 h 28 min late time
   but only 6 min 54 s net) and Haymarket to Government Center.
 - **Rider time lost (estimate): about 15.55 million rider-seconds on an average weekday
