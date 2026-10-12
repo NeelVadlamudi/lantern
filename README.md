@@ -1,7 +1,11 @@
-# Where the MBTA subway falls behind its schedule
+# Lantern
 
-A dbt project on public MBTA data. It compares every subway train's recorded stop-to-stop run
-times and gaps between trains against the published schedule. The headline is measured train
+Where the T runs late, from recorded train runs.
+
+Lantern is a dbt project on public MBTA data. The board is published at
+https://neelvadlamudi.github.io/lantern/ (dbt docs at https://neelvadlamudi.github.io/lantern/dbt/);
+the source is https://github.com/NeelVadlamudi/lantern. It compares every subway train's
+recorded stop-to-stop run times and gaps between trains against the published schedule. The headline is measured train
 time over schedule; an estimate of rider time lost, weighted by fare-gate entries, sits next to
 it.
 

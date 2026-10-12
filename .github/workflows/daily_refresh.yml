@@ -1,4 +1,4 @@
-name: Daily refresh
+name: "Lantern: daily refresh"
 
 # Reads the newest MBTA service date, rebuilds, and publishes docs/ and out/ to GitHub Pages.
 # docs/ becomes the site root (board at ./index.html, dbt docs at ./dbt/index.html), out/ is ./out/.

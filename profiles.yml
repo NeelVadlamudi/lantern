@@ -1,7 +1,7 @@
 # In-repo profile so `dbt build --profiles-dir .` works from the repo root with no setup.
 # DuckDB is a local file; no account, server or key is needed. httpfs lets DuckDB read the
 # public MBTA files straight from their https URLs.
-mbta_reliability:
+lantern:
   target: dev
   outputs:
     dev:

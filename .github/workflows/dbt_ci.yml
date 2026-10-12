@@ -1,4 +1,4 @@
-name: dbt CI
+name: "Lantern: dbt CI"
 
 # Runs on every push and pull request against the committed sample in data/sample/
 # (two real service dates). Only dbt, DuckDB and sqlfluff run here; the sample is read in place

@@ -1,7 +1,7 @@
-name: mbta_reliability
+name: lantern
 version: "0.1.0"
 config-version: 2
-profile: mbta_reliability
+profile: lantern
 
 model-paths: ["models"]
 seed-paths: ["seeds"]
@@ -54,7 +54,7 @@ on-run-end:
   - "{{ write_build_outputs(results) }}"
 
 models:
-  mbta_reliability:
+  lantern:
     staging:
       +materialized: view
       +schema: staging
@@ -76,11 +76,11 @@ models:
         compression: zstd
 
 seeds:
-  mbta_reliability:
+  lantern:
     +schema: reference
 
 snapshots:
-  mbta_reliability:
+  lantern:
     +schema: snapshots
 
 flags:
