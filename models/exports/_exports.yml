@@ -284,6 +284,20 @@ models:
         data_tests:
           - not_null
 
+  - name: board_headway_adherence
+    description: "Parquet file out/headway_adherence.parquet. Grain: one row per scope (system or route), service date and service hour: departures compared, bunched (under 2 min) and gapped (over scheduled + 5 min) counts and shares (SFMTA rules)."
+  - name: board_line_day_completeness
+    description: "Parquet file out/line_day_completeness.parquet. Grain: one row per scope and service date: trips scheduled (GTFS), observed and compared, completeness share and the low-completeness flag."
+  - name: board_station_hour_heatmap_red
+    description: "Parquet file out/station_hour_heatmap_red.parquet. The station_hour_heatmap.parquet rows for one line, so the page loads only the picked line."
+  - name: board_station_hour_heatmap_orange
+    description: "Parquet file out/station_hour_heatmap_orange.parquet. The station_hour_heatmap.parquet rows for one line, so the page loads only the picked line."
+  - name: board_station_hour_heatmap_blue
+    description: "Parquet file out/station_hour_heatmap_blue.parquet. The station_hour_heatmap.parquet rows for one line, so the page loads only the picked line."
+  - name: board_station_hour_heatmap_green
+    description: "Parquet file out/station_hour_heatmap_green.parquet. The station_hour_heatmap.parquet rows for one line, so the page loads only the picked line."
+  - name: board_station_hour_heatmap_mattapan
+    description: "Parquet file out/station_hour_heatmap_mattapan.parquet. The station_hour_heatmap.parquet rows for one line, so the page loads only the picked line."
   - name: board_line_day_metrics
     description: "Parquet file out/line_day_metrics.parquet. Grain: one row per scope (system or route), service date and measure, with the typical value for the same day type and the difference. For the date filter."
   - name: board_day_worst_segments

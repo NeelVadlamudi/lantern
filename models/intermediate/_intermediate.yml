@@ -84,3 +84,19 @@ models:
       - name: terminal_time_split
         data_tests:
           - not_null
+
+  - name: int_scheduled_subway_trips
+    description: >
+      Grain: one row per scheduled subway trip and service date in the loaded window. A trip is
+      scheduled when its service_id runs that weekday within the calendar dates of the GTFS archive
+      rows valid on the date, or is added that date (calendar_dates 1), and is not removed that
+      date (calendar_dates 2).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [service_date, trip_id]
+    columns:
+      - name: trip_id
+        data_tests: [not_null]
+      - name: route_id
+        data_tests: [not_null]

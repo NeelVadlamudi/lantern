@@ -25,7 +25,8 @@ select
     holidays.holiday_name is not null as is_holiday,
     cast(holidays.holiday_name as varchar) as holiday_name,
     cast(date_trunc('month', spine.date_day) as date) as month_start_date,
-    cast(date_trunc('week', spine.date_day) as date) as week_start_date
+    cast(date_trunc('week', spine.date_day) as date) as week_start_date,
+    {{ dst_extra_hours('spine.date_day') }} as dst_extra_hours
 from spine
 left join {{ ref('holidays') }} as holidays
     on spine.date_day = holidays.holiday_date

@@ -70,6 +70,26 @@ models:
         data_tests:
           - not_null
 
+  - name: stg_gtfs__calendar
+    description: "GTFS calendar, all archive versions. Grain: one row per service_id and archive validity range."
+    columns:
+      - name: service_id
+        data_tests: [not_null]
+  - name: stg_gtfs__calendar_dates
+    description: "GTFS calendar_dates, all archive versions. Grain: one row per service_id, date and archive validity range. exception_type 1 adds service, 2 removes it."
+    columns:
+      - name: exception_type
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [1, 2]
+  - name: stg_gtfs__subway_trips
+    description: "GTFS trips for the eight subway routes, all archive versions. Grain: one row per trip and archive validity range."
+    columns:
+      - name: trip_id
+        data_tests: [not_null]
+      - name: service_id
+        data_tests: [not_null]
   - name: stg_gtfs__routes
     description: "GTFS routes, all archive versions. Grain: one row per route id and version."
     data_tests:

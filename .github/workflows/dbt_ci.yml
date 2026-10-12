@@ -28,6 +28,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      - name: Leak scan (tracked files)
+        run: bash scripts/leak_scan.sh
+
       - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
@@ -45,7 +48,8 @@ jobs:
       # Day 1: full build of the first sample date. The on-run-end hook writes out/board_data.json
       # and out/build_results.json only if every model and test passed.
       - name: dbt build (full refresh, sample day 1)
-        run: dbt build --profiles-dir . --full-refresh --vars '{use_sample: true, lamp_end_date: 2026-08-27}'
+        run: |
+          dbt build --profiles-dir . --full-refresh --vars '{use_sample: true, lamp_end_date: 2026-08-27}'
 
       # Day 2: incremental build. tests/incremental/ checks a new date was added, older dates were
       # not rebuilt, and fact rows per date equal staging.
@@ -55,7 +59,12 @@ jobs:
           dbt build --profiles-dir . --vars '{use_sample: true, lamp_end_date: 2026-08-28, check_incremental: true}'
 
       - name: Check the build recorded no failures
-        run: dbt test --profiles-dir . --select tag:post_build --vars '{use_sample: true, check_build: true}'
+        run: |
+          dbt test --profiles-dir . --select tag:post_build --vars '{use_sample: true, check_build: true}'
+
+      - name: Leak scan (built files)
+        run: bash scripts/leak_scan.sh out
 
       - name: Docs
-        run: dbt docs generate --profiles-dir . --static --target-path target_docs --vars '{use_sample: true}'
+        run: |
+          dbt docs generate --profiles-dir . --static --target-path target_docs --vars '{use_sample: true}'

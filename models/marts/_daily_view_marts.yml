@@ -3,7 +3,7 @@ version: 2
 models:
   - name: mart_line_day_metrics
     description: >-
-      Grain: one row per scope (system or route), service date and measure. Each days value with the typical value for the same day type over the earlier var typical_days dates with data, and the exact difference.
+      Grain: one row per scope (system, route, or Green = all four Green Line branches combined), service date and measure. Each days value with the typical value for the same day type over the earlier var typical_days dates with data, and the exact difference.
     config:
       contract:
         enforced: true
@@ -16,7 +16,9 @@ models:
           - not_null
       - name: scope_id
         data_type: varchar
-        description: '''system'' (all subway routes) or a GTFS route id; for Commuter Rail and survey marts see the model description.'
+        description: '''system'' (all subway routes), a GTFS route id, or ''Green'' (Green-B, -C, -D and -E combined); for Commuter Rail and survey marts see the model description.'
+        data_tests:
+          - not_null
       - name: service_date
         data_type: date
         description: 'Service date.'
@@ -31,7 +33,7 @@ models:
         description: 'Measure name.'
       - name: unit
         data_type: varchar
-        description: 'count, share or seconds.'
+        description: 'count, share (0 to 1), seconds, or ratio (completeness_share: trips compared over trips scheduled, can exceed 1 when added trips run).'
       - name: value
         data_type: double
         description: 'The days value of the measure.'
@@ -554,3 +556,98 @@ models:
       - name: share_of_positive_excess
         data_type: double
         description: 'Share of positive excess.'
+  - name: mart_headway_adherence
+    description: >
+      Grain: one row per scope ('system' or a subway route id), service date and service hour.
+      Bunched (headway under var bunched_max_seconds, 120 s) and gapped (headway over the scheduled
+      headway plus var gapped_extra_seconds, 300 s) departures among departures with a headway
+      comparison: the SFMTA rules as described by Swiftly
+      (https://www.goswift.ly/blog/how-well-is-america-sticking-to-its-promised-headways).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [scope_id, service_date, service_hour]
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "bunched_departures + gapped_departures <= departures_compared"
+    columns:
+      - name: scope_id
+        data_type: varchar
+        description: "'system' or a subway route id."
+        data_tests: [not_null]
+      - name: service_date
+        data_type: date
+        description: 'Service date.'
+      - name: date_key
+        data_type: integer
+        description: 'Service date as YYYYMMDD.'
+      - name: day_type
+        data_type: varchar
+        description: 'weekday, saturday, sunday or holiday.'
+      - name: service_hour
+        data_type: integer
+        description: 'Hour of the service day (after-midnight trains count as 24 and up).'
+      - name: departures_compared
+        data_type: bigint
+        description: 'Departures with actual and scheduled trunk headway both known and above zero.'
+      - name: bunched_departures
+        data_type: bigint
+        description: 'Departures less than 120 s after the previous train at the stop.'
+      - name: gapped_departures
+        data_type: bigint
+        description: 'Departures whose gap was more than the scheduled gap plus 300 s.'
+      - name: bunched_share
+        data_type: double
+        description: 'bunched_departures / departures_compared.'
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1}
+      - name: gapped_share
+        data_type: double
+        description: 'gapped_departures / departures_compared.'
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1}
+  - name: mart_line_day_completeness
+    description: >
+      Grain: one row per scope ('system' or a subway route id) and service date in the window.
+      Trips compared against trips in the GTFS schedule published for the date
+      (int_scheduled_subway_trips). is_low_completeness when completeness_share is below var
+      completeness_min_share (0.8). A low day can be missing data or a real service change.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [scope_id, service_date]
+    columns:
+      - name: scope_id
+        data_type: varchar
+        description: "'system' or a subway route id."
+        data_tests: [not_null]
+      - name: service_date
+        data_type: date
+        description: 'Service date.'
+      - name: date_key
+        data_type: integer
+        description: 'Service date as YYYYMMDD.'
+      - name: day_type
+        data_type: varchar
+        description: 'weekday, saturday, sunday or holiday.'
+      - name: scheduled_trips
+        data_type: bigint
+        description: 'Trips in the GTFS schedule for that date (0 when none).'
+      - name: trips_observed
+        data_type: bigint
+        description: 'Train runs LAMP recorded (fct_trips; one per trip and vehicle).'
+      - name: trips_compared
+        data_type: bigint
+        description: 'Runs with at least one stop-to-stop comparison (the late-trip denominator).'
+      - name: completeness_share
+        data_type: double
+        description: 'trips_compared / scheduled_trips; null with no scheduled trips; can exceed 1 with added trips.'
+      - name: completeness_min_share
+        data_type: double
+        description: 'The threshold used (var completeness_min_share).'
+      - name: is_low_completeness
+        data_type: boolean
+        description: 'True when trips_compared is below completeness_min_share x scheduled_trips (a day with no trips compared and none scheduled is not low).'
+        data_tests: [not_null]

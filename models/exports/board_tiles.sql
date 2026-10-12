@@ -1,8 +1,9 @@
 {{ config(materialized='table') }}
--- Board headline tiles: one row per tile, in display order. Measured train delay comes first:
+-- Board headline tiles: one row per tile, in display order. The late-trip share comes first,
+-- measured train delay second:
 -- recorded train run time over the schedule on an average weekday (mart_train_delay_summary),
 -- positive (late time only) and net, with the all-days values next to it. Rider time lost is
--- second and is an estimate (people entering stations, riders assumed to arrive at random).
+-- third and is an estimate (people entering stations, riders assumed to arrive at random).
 -- Every tile has `sentence`: one plain sentence filled from the tile's own values. Time values
 -- also carry exact seconds (value_seconds) and a format_duration label (value_label). The late, excess and long-gap
 -- tiles are over all days (weekdays, weekends and holidays); value_weekday carries the same
@@ -88,6 +89,69 @@ late_margin as (
     cross join runner_up_late
 ),
 
+-- day-paired comparison of the top two lines: one difference in late share per service date
+-- both ran, so trips on the same day (which share causes) count once. paired_t = mean daily
+-- difference / (sd / sqrt(days)); |paired_t| below var('tie_t') (1.96) reads as a tie.
+paired_days as (
+    select
+        daily.service_date,
+        daily.day_type,
+        max(daily.late_trip_share) filter (where daily.route_id = worst_late.route_id)
+        - max(daily.late_trip_share) filter (where daily.route_id = runner_up_late.route_id) as diff_share
+    from {{ ref('mart_line_daily_reliability') }} as daily
+    cross join worst_late
+    cross join runner_up_late
+    group by daily.service_date, daily.day_type
+),
+
+paired as (
+    select
+        count(diff_share) as days_compared,
+        count(*) filter (where diff_share > 0) as days_worst_higher,
+        avg(diff_share) as mean_diff_share,
+        avg(diff_share) / (stddev_samp(diff_share) / sqrt(count(diff_share))) as paired_t,
+        count(diff_share) filter (where day_type = 'weekday') as weekdays_compared,
+        count(*) filter (where day_type = 'weekday' and diff_share > 0) as weekdays_worst_higher,
+        avg(diff_share) filter (where day_type = 'weekday') as weekday_mean_diff_share,
+        avg(diff_share) filter (where day_type = 'weekday')
+        / (
+            stddev_samp(diff_share) filter (where day_type = 'weekday')
+            / sqrt(count(diff_share) filter (where day_type = 'weekday'))
+        ) as weekday_paired_t
+    from paired_days
+),
+
+weekday_lines as (
+    select
+        daily.route_id,
+        routes.display_name,
+        sum(daily.late_trips) as late_trips,
+        sum(daily.trips_compared) as trips_compared,
+        sum(daily.late_trips) / sum(daily.trips_compared) as late_trip_share,
+        row_number() over (
+            order by sum(daily.late_trips) / sum(daily.trips_compared) desc, any_value(routes.display_order)
+        ) as weekday_rank
+    from {{ ref('mart_line_daily_reliability') }} as daily
+    inner join {{ ref('dim_routes') }} as routes on daily.route_id = routes.route_id
+    where daily.day_type = 'weekday'
+    group by daily.route_id, routes.display_name
+),
+
+weekday_worst as (
+    select
+        first_line.route_id,
+        first_line.display_name,
+        first_line.late_trips,
+        first_line.trips_compared,
+        first_line.late_trip_share,
+        second_line.route_id as runner_up_route_id,
+        second_line.display_name as runner_up_display_name,
+        second_line.late_trip_share as runner_up_late_trip_share
+    from weekday_lines as first_line
+    inner join weekday_lines as second_line on second_line.weekday_rank = 2
+    where first_line.weekday_rank = 1
+),
+
 worst_gap as (
     select * from {{ ref('board_line_totals') }}
     order by long_gap_share desc, display_order asc
@@ -150,6 +214,39 @@ rider_time as (
     where has_rider_data
 ),
 
+-- typical range of the daily system values behind the headline tiles: p25, median and p75 of
+-- one value per service date (mart_line_day_metrics, scope 'system')
+daily_range as (
+    select
+        count(*) filter (where measure = 'late_trip_share') as late_days,
+        quantile_cont(value, 0.25) filter (where measure = 'late_trip_share') as late_p25,
+        median(value) filter (where measure = 'late_trip_share') as late_median,
+        quantile_cont(value, 0.75) filter (where measure = 'late_trip_share') as late_p75,
+        count(*) filter (where measure = 'late_trip_share' and day_type = 'weekday') as late_weekdays,
+        quantile_cont(value, 0.25) filter (where measure = 'late_trip_share' and day_type = 'weekday')
+            as late_weekday_p25,
+        median(value) filter (where measure = 'late_trip_share' and day_type = 'weekday') as late_weekday_median,
+        quantile_cont(value, 0.75) filter (where measure = 'late_trip_share' and day_type = 'weekday')
+            as late_weekday_p75,
+        count(*) filter (where measure = 'train_delay_positive_seconds' and day_type = 'weekday') as delay_weekdays,
+        quantile_cont(value, 0.25) filter (where measure = 'train_delay_positive_seconds' and day_type = 'weekday')
+            as delay_weekday_p25,
+        median(value) filter (where measure = 'train_delay_positive_seconds' and day_type = 'weekday')
+            as delay_weekday_median,
+        quantile_cont(value, 0.75) filter (where measure = 'train_delay_positive_seconds' and day_type = 'weekday')
+            as delay_weekday_p75,
+        quantile_cont(value, 0.25) filter (
+            where measure = 'train_delay_positive_per_run_seconds' and day_type = 'weekday'
+        ) as per_run_weekday_p25,
+        median(value) filter (where measure = 'train_delay_positive_per_run_seconds' and day_type = 'weekday')
+            as per_run_weekday_median,
+        quantile_cont(value, 0.75) filter (
+            where measure = 'train_delay_positive_per_run_seconds' and day_type = 'weekday'
+        ) as per_run_weekday_p75
+    from {{ ref('mart_line_day_metrics') }}
+    where scope_id = 'system'
+),
+
 freshness as (
     select
         max(date_day) as last_service_date,
@@ -159,7 +256,7 @@ freshness as (
 
 tiles as (
     select
-        0 as sort_order,
+        1 as sort_order,
         'train_delay_weekday' as tile_id,
         train_delay.weekday_seconds as value_number,
         train_delay.weekday_seconds as value_weekday,
@@ -204,6 +301,17 @@ tiles as (
             'all_days_net_per_run_seconds', train_delay.all_days_net_per_run_seconds,
             'all_days_net_per_run_label', {{ format_duration('train_delay.all_days_net_per_run_seconds') }},
             'service_dates', train_delay.service_dates,
+            'typical_range', json_object(
+                'rule', 'p25, median and p75 over weekdays of the daily system train delay (late time only)'
+                || ' and of the daily per-run value, one value per weekday',
+                'weekdays', daily_range.delay_weekdays,
+                'p25_seconds', daily_range.delay_weekday_p25,
+                'median_seconds', daily_range.delay_weekday_median,
+                'p75_seconds', daily_range.delay_weekday_p75,
+                'per_run_p25_seconds', daily_range.per_run_weekday_p25,
+                'per_run_median_seconds', daily_range.per_run_weekday_median,
+                'per_run_p75_seconds', daily_range.per_run_weekday_p75
+            ),
             'sentence', 'On an average weekday, each train run between two stops took '
             || {{ format_duration('train_delay.weekday_per_run_seconds') }}
             || ' longer than scheduled, counting late time only ('
@@ -224,11 +332,12 @@ tiles as (
             || {{ format_duration('train_delay.all_days_seconds') }} || ' a day.'
         ) as tile
     from train_delay
+    cross join daily_range
 
     union all
 
     select
-        1 as sort_order,
+        2 as sort_order,
         'rider_time_lost' as tile_id,
         rider_time.weekday_seconds as value_number,
         rider_time.weekday_seconds as value_weekday,
@@ -284,7 +393,7 @@ tiles as (
     union all
 
     select
-        2 as sort_order,
+        0 as sort_order,
         'late_trip_share' as tile_id,
         {{ board_round('system_wide.late_trip_share', 4) }} as value_number,
         {{ board_round('weekday.late_trip_share', 4) }} as value_weekday,
@@ -299,6 +408,17 @@ tiles as (
             'display_weekday', printf('%.1f%%', 100 * weekday.late_trip_share),
             'late_trips', system_wide.late_trips,
             'trips_compared', system_wide.trips_compared,
+            'typical_range', json_object(
+                'rule', 'p25, median and p75 of the daily system late share, one value per service date',
+                'days', daily_range.late_days,
+                'p25', daily_range.late_p25,
+                'median', daily_range.late_median,
+                'p75', daily_range.late_p75,
+                'weekdays', daily_range.late_weekdays,
+                'weekday_p25', daily_range.late_weekday_p25,
+                'weekday_median', daily_range.late_weekday_median,
+                'weekday_p75', daily_range.late_weekday_p75
+            ),
             'late_trips_weekday', weekday.late_trips,
             'trips_compared_weekday', weekday.trips_compared,
             'trips_with_long_runs', system_wide.trips_with_long_runs,
@@ -317,6 +437,7 @@ tiles as (
         ) as tile
     from system_wide
     cross join weekday
+    cross join daily_range
 
     union all
 
@@ -444,8 +565,42 @@ tiles as (
             -- share causes, so they are not fully): read it as an upper bound on how clear the gap is
             'margin_z', late_margin.margin_share
             / sqrt(late_margin.pooled_share * (1 - late_margin.pooled_share) * late_margin.inverse_trips),
-            'sentence', worst_late.display_name || ' had the highest share of trips 5+ minutes late over all'
-            || ' days (' || printf('%.1f%%', 100 * worst_late.late_trip_share) || ').',
+            'tie_rule', 'Day-paired: one difference in late share (top line minus runner-up) per service'
+            || ' date both ran; paired_t = mean difference / (sd / sqrt(days)). |paired_t| < {{ var("tie_t") }}'
+            || ' is a tie. Trips on one day share causes, so days, not trips, are the units.',
+            'days_compared', paired.days_compared,
+            'days_worst_higher', paired.days_worst_higher,
+            'mean_daily_diff_share', paired.mean_diff_share,
+            'paired_t', paired.paired_t,
+            'is_tie_overall', abs(paired.paired_t) < {{ var('tie_t') }},
+            'weekdays_compared', paired.weekdays_compared,
+            'weekdays_worst_higher', paired.weekdays_worst_higher,
+            'weekday_mean_daily_diff_share', paired.weekday_mean_diff_share,
+            'weekday_paired_t', paired.weekday_paired_t,
+            'is_tie_weekday', abs(paired.weekday_paired_t) < {{ var('tie_t') }},
+            'weekday_value', weekday_worst.route_id,
+            'weekday_display', weekday_worst.display_name,
+            'weekday_metric_value_exact', weekday_worst.late_trip_share,
+            'weekday_late_trips', weekday_worst.late_trips,
+            'weekday_trips_compared', weekday_worst.trips_compared,
+            'weekday_runner_up_value', weekday_worst.runner_up_route_id,
+            'weekday_runner_up_metric_value_exact', weekday_worst.runner_up_late_trip_share,
+            'sentence', case
+                when abs(paired.paired_t) < {{ var('tie_t') }}
+                    then 'A tie overall between ' || worst_late.display_name || ' and '
+                        || runner_up_late.display_name || ' (' || printf('%.1f%%', 100 * worst_late.late_trip_share)
+                        || ' and ' || printf('%.1f%%', 100 * runner_up_late.late_trip_share)
+                        || ' of trips 5+ minutes late)'
+                else worst_late.display_name || ' had the highest share of trips 5+ minutes late over all'
+                    || ' days (' || printf('%.1f%%', 100 * worst_late.late_trip_share) || ')'
+            end
+            || case
+                when abs(paired.weekday_paired_t) >= {{ var('tie_t') }} and paired.weekday_mean_diff_share > 0
+                    then '; ' || worst_late.display_name || ' worse on weekdays ('
+                        || printf('%.1f%%', 100 * weekday_worst.late_trip_share) || ', higher on '
+                        || paired.weekdays_worst_higher || ' of ' || paired.weekdays_compared || ' weekdays).'
+                else '.'
+            end,
             'explainer', 'Over all days, ' || worst_late.display_name
             || ' had the highest share of trips 5+ minutes late ('
             || printf('%.1f%%', 100 * worst_late.late_trip_share)
@@ -457,6 +612,8 @@ tiles as (
     from worst_late
     cross join runner_up_late
     cross join late_margin
+    cross join paired
+    cross join weekday_worst
     cross join worst_relative
     cross join worst_gap
 

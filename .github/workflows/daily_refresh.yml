@@ -8,16 +8,22 @@ name: "Lantern: daily refresh"
 # the LAMP staging table and the incremental fact only process new service dates. On a cache
 # miss dbt builds the default window (the last 90 complete service dates) and the station
 # snapshot history is replayed.
+#
+# Last good version: the site is published only from a build whose models and tests all passed
+# and whose files pass the leak scan. A passing run saves its site to the cache (lantern-site-*).
+# When the build or a test fails, that last good site is restored and republished unchanged
+# except for out/health.json, so the previous data stays live and the failure is on record.
+# With no saved site (first run), nothing is published. The job still ends as failed.
+# out/health.json is the public run log: one line per run (date, pass or fail, row counts),
+# the last 30 runs, newest first.
 
 on:
   schedule:
     - cron: "30 11 * * *"  # 07:30 Boston (EDT) / 06:30 (EST); LAMP posts the previous day overnight
   workflow_dispatch:
 
-permissions:
-  contents: read
-  pages: write
-  id-token: write
+# Nothing by default; each job asks for what it needs. Only the built-in GITHUB_TOKEN is used.
+permissions: {}
 
 concurrency:
   group: daily-refresh
@@ -30,8 +36,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: read
+    outputs:
+      site_ready: ${{ steps.site.outputs.ready }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Leak scan (tracked files)
+        run: bash scripts/leak_scan.sh
 
       - uses: actions/setup-python@v7
         with:
@@ -52,13 +65,18 @@ jobs:
       - name: dbt deps
         run: dbt deps --profiles-dir .
 
+      # From here to the post-build check a failure does not stop the job: the outcome decides
+      # below whether this run's files or the last good site are published.
       - name: Source freshness
+        id: freshness
+        continue-on-error: true
         run: dbt source freshness --profiles-dir .
 
       # refresh_reference re-reads the GTFS archive and the Open Data CSVs into their staging
       # tables once a day; between runs they are kept in the cached warehouse.
       - name: dbt build
         id: build
+        continue-on-error: true
         run: |
           if [ -f warehouse/mbta.duckdb ]; then
             echo "Warehouse restored from cache; reading new service dates only"
@@ -72,7 +90,9 @@ jobs:
       # New warehouse only: drop the snapshot and replay each GTFS version in date order, so
       # dbt_valid_from / dbt_valid_to carry the real GTFS dates.
       - name: Replay station snapshot history
-        if: steps.build.outputs.fresh == 'true'
+        id: replay
+        if: steps.build.outcome == 'success' && steps.build.outputs.fresh == 'true'
+        continue-on-error: true
         run: |
           for d in $(dbt --quiet run-operation station_snapshot_replay_dates --args '{reset: true}' --profiles-dir .); do
             dbt build --profiles-dir . -s int_gtfs_stations_as_of snap_gtfs_stations --vars "{gtfs_as_of: '$d'}"
@@ -80,16 +100,32 @@ jobs:
           dbt run --profiles-dir . -s int_gtfs_stations_as_of
 
       - name: Check the build recorded no failures
-        run: dbt test --profiles-dir . --select tag:post_build --vars '{check_build: true}'
+        id: check
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: |
+          dbt test --profiles-dir . --select tag:post_build --vars '{check_build: true}'
+
+      - name: Decide what to publish
+        id: outcome
+        run: |
+          if [ "${{ steps.build.outcome }}" = "success" ] && [ "${{ steps.check.outcome }}" = "success" ] \
+             && [ "${{ steps.replay.outcome }}" != "failure" ] && [ -f out/board_data.json ]; then
+            echo "good=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "good=false" >> "$GITHUB_OUTPUT"
+            echo "Build or tests failed: the last good site will be republished"
+          fi
 
       - name: Save warehouse
-        if: success()
+        if: steps.outcome.outputs.good == 'true'
         uses: actions/cache/save@v6
         with:
           path: warehouse/mbta.duckdb
           key: mbta-duckdb-v3-${{ github.run_id }}
 
       - name: Docs
+        if: steps.outcome.outputs.good == 'true'
         run: |
           dbt docs generate --profiles-dir . --static --target-path target_docs
           mkdir -p docs/dbt
@@ -97,24 +133,80 @@ jobs:
 
       # Site layout: docs/ is the Pages root (the board is docs/index.html, dbt docs at
       # ./dbt/index.html) and the exported data is served at ./out/.
-      - name: Assemble site
+      - name: Assemble site (this run)
+        if: steps.outcome.outputs.good == 'true'
         run: |
           mkdir -p _site
           cp -r docs/. _site/
           rm -f _site/.gitkeep
           cp -r out _site/out
-          rm -f _site/out/.gitkeep
+          rm -f _site/out/.gitkeep _site/out/health_run.json
           if [ ! -f _site/index.html ]; then cp site/index.html _site/index.html; fi
 
+      - name: Restore last good site
+        id: last_good
+        if: steps.outcome.outputs.good != 'true'
+        uses: actions/cache/restore@v6
+        with:
+          path: _site
+          key: lantern-site-${{ github.run_id }}
+          restore-keys: lantern-site-
+
       - uses: actions/configure-pages@v6
+        id: pages
+
+      # Run log: this run's line (written by the on-run-end hook, pass or fail) is added to the
+      # live health.json, keeping the last 30 runs. A missing or unreadable live file starts a new log.
+      - name: Health log
+        run: |
+          if [ ! -f out/health_run.json ]; then
+            jq -n --arg d "$(TZ=America/New_York date +%F)" \
+              '{run_date: $d, status: "fail", nodes_failed: null, note: "dbt did not record a run"}' > out/health_run.json
+          fi
+          curl -fsS --max-time 30 "${{ steps.pages.outputs.base_url }}/out/health.json" -o previous_health.json \
+            && jq -e '.runs | type == "array"' previous_health.json > /dev/null \
+            || echo '{"runs": []}' > previous_health.json
+          if [ -d _site/out ]; then
+            jq -s --arg published "${{ steps.outcome.outputs.good == 'true' && 'this run' || 'last good run kept' }}" \
+              '{runs: ([.[1] + {published: $published}] + .[0].runs)[:30]}' \
+              previous_health.json out/health_run.json > _site/out/health.json
+          fi
+
+      - name: Leak scan (site)
+        id: site_scan
+        if: hashFiles('_site/out/board_data.json') != ''
+        run: bash scripts/leak_scan.sh _site
+
+      - name: Save site as last good
+        if: steps.outcome.outputs.good == 'true' && steps.site_scan.outcome == 'success'
+        uses: actions/cache/save@v6
+        with:
+          path: _site
+          key: lantern-site-${{ github.run_id }}
+
+      - name: Mark site ready
+        id: site
+        if: steps.site_scan.outcome == 'success'
+        run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-pages-artifact@v5
+        if: steps.site.outputs.ready == 'true'
         with:
           path: _site
 
+      - name: Fail the run when the build failed
+        if: steps.outcome.outputs.good != 'true'
+        run: |
+          echo "This run's build or tests failed; the last good site was kept (if one was saved)."
+          exit 1
+
   deploy:
     needs: build
+    if: ${{ !cancelled() && needs.build.outputs.site_ready == 'true' }}
     runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

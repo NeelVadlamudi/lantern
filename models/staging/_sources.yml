@@ -70,6 +70,12 @@ sources:
       - name: gtfs_shapes
         identifier: shapes
         description: GTFS shapes.txt. Staging keeps only the shapes of those representative trips.
+      - name: gtfs_calendar
+        identifier: calendar
+        description: GTFS calendar.txt (weekly service patterns per service_id), all versions for the listed years.
+      - name: gtfs_calendar_dates
+        identifier: calendar_dates
+        description: GTFS calendar_dates.txt (added and removed service per date), all versions for the listed years.
 
   - name: mbta_open_data
     description: >

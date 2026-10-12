@@ -53,6 +53,13 @@ models:
       - name: week_start_date
         data_type: date
         description: Monday of the ISO week.
+      - name: dst_extra_hours
+        data_type: integer
+        description: >-
+          Clock hours gained (+1) or lost (-1) by the DST change in the early morning after this
+          service date, else 0. On a +1 night (2026-10-31) service hour 25 holds two clock hours;
+          on a -1 night service hour 26 is empty. Hourly counts on those nights are not comparable
+          to other nights; shares and per-run values are.
   - name: dim_service_periods
     description: >-
       MBTA weekday time periods from the Service Delivery Policy (Dec 2025, Table 1). Grain: one row per

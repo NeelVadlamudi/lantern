@@ -25,6 +25,11 @@ vars:
   worse_recent_days: 14        # "getting worse": the last N service dates ...
   worse_prior_days: 28         # ... compared with the N dates before them
   worst_window_days: 14        # worst window: the N consecutive calendar days with the largest share of a segment's train delay
+  completeness_min_share: 0.8  # completeness: a line-day is flagged low when trips compared / trips scheduled is below this
+  tie_t: 1.96                  # worst line: a day-paired difference with |t| below this reads as a tie
+  bunched_max_seconds: 120     # bunched: a departure less than this after the previous train (SFMTA rule, via Swiftly)
+  gapped_extra_seconds: 300    # gapped: a gap more than the scheduled gap plus this (SFMTA rule, via Swiftly)
+  survey_min_respondents: 30   # survey: cells with fewer respondents are suppressed on the board (share and margin set to null)
   worse_min_volume_recent: 300 # flag only with at least this many train runs (segments) or departures
   worse_min_volume_prior: 600  #   (stations) in each window, about 21 a day
   worse_min_delta_seconds: 5   # and only if excess per train run (or per rider) rose by at least this

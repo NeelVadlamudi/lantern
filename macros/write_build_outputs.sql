@@ -60,6 +60,42 @@
     {%- endcall -%}
     {%- do adapter.commit() -%}
 
+    {#- 1b. run log for this invocation -> <out>/health_run.json, written pass or fail. The daily
+        workflow merges it into the public health.json (last 30 runs). Row counts are read only
+        from tables that exist, so a failed build still gets a log line. -#}
+    {%- set count_sql = [] -%}
+    {%- for name, schema_name in [
+        ('stg_lamp__subway_trip_stops', 'staging'), ('fct_trip_stop_events', 'marts'),
+        ('fct_trips', 'marts'), ('dim_dates', 'marts'), ('stg_mbta__gated_entries', 'staging')
+    ] -%}
+        {%- set node = graph.nodes.get('model.' ~ project_name ~ '.' ~ name) -%}
+        {%- set rel = adapter.get_relation(database=node.database, schema=node.schema, identifier=node.alias)
+            if node else none -%}
+        {%- if rel is not none -%}
+            {%- do count_sql.append("'" ~ name ~ "', (select count(*) from " ~ rel ~ ")") -%}
+        {%- else -%}
+            {%- do count_sql.append("'" ~ name ~ "', null") -%}
+        {%- endif -%}
+    {%- endfor -%}
+    {%- set dates_node = graph.nodes.get('model.' ~ project_name ~ '.dim_dates') -%}
+    {%- set dates_rel = adapter.get_relation(
+        database=dates_node.database, schema=dates_node.schema, identifier=dates_node.alias
+    ) if dates_node else none -%}
+    {%- call statement('write_health_run') -%}
+        copy (
+            select
+                strftime(current_timestamp at time zone 'UTC', '%Y-%m-%dT%H:%M:%SZ') as run_at_utc,
+                strftime(cast(timezone('America/New_York', now()) as date), '%Y-%m-%d') as run_date,
+                {{ "'pass'" if ns.problems == 0 else "'fail'" }} as status,
+                {{ ns.problems }} as nodes_failed,
+                (select count(*) from audit.build_results) as nodes_run,
+                {% if dates_rel is not none -%}
+                (select strftime(max(date_day), '%Y-%m-%d') from {{ dates_rel }})
+                {%- else -%}null{%- endif %} as latest_service_date,
+                json_object({{ count_sql | join(', ') }}) as row_counts
+        ) to '{{ out_dir }}/health_run.json' (format json);
+    {%- endcall -%}
+
     {%- if not ns.payload_ok or ns.problems > 0 -%}
         {%- do log("board_data.json not written: board_payload did not run in this invocation or "
             ~ ns.problems ~ " node(s) errored or failed", info=true) -%}
@@ -225,6 +261,7 @@
                 decision,
                 glossary,
                 latest_day,
+                methods,
                 commuter_rail,
                 survey,
                 charts

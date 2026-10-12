@@ -6,7 +6,9 @@
                   (yesterday in Boston, since today's file is still being written).
     Window start: incremental run -> latest service date already loaded minus
                   var('incremental_lookback_days') (LAMP republishes recent files), so the
-                  lookback dates are re-read and replaced;
+                  lookback dates are re-read and replaced; any older loaded date whose index
+                  last_modified is later than when it was loaded (republished after the
+                  lookback) is re-read too;
                   full refresh   -> var('lamp_start_date'), else end minus
                   var('lamp_window_days') - 1 (default: the last 90 complete dates).
 -#}
@@ -15,7 +17,13 @@
         {{ return([]) }}
     {%- endif -%}
     {%- set index -%}
-        (select cast(service_date as date) as service_date, file_url from {{ source('lamp', 'lamp_index') }})
+        (
+            select
+                cast(service_date as date) as service_date,
+                file_url,
+                cast(cast(last_modified as timestamptz) at time zone 'UTC' as timestamp) as last_modified_utc
+            from {{ source('lamp', 'lamp_index') }}
+        )
     {%- endset -%}
     {%- if var('lamp_end_date', none) -%}
         {%- set end_sql = "date '" ~ var('lamp_end_date') ~ "'" -%}
@@ -36,10 +44,27 @@
     {%- else -%}
         {%- set start_sql = end_sql ~ " - " ~ (var('lamp_window_days') - 1) -%}
     {%- endif -%}
+    {%- if is_incremental() -%}
+        {%- set republished_sql -%}
+            or (
+                lamp_index.service_date <= {{ end_sql }}
+                and lamp_index.service_date in (
+                    select loaded.service_date
+                    from (
+                        select service_date, max(_loaded_at) as loaded_at from {{ this }} group by service_date
+                    ) as loaded
+                    inner join {{ index }} as republished on loaded.service_date = republished.service_date
+                    where republished.last_modified_utc > loaded.loaded_at
+                )
+            )
+        {%- endset -%}
+    {%- else -%}
+        {%- set republished_sql = '' -%}
+    {%- endif -%}
     {%- set query -%}
         select file_url
         from {{ index }} as lamp_index
-        where service_date between {{ start_sql }} and {{ end_sql }}
+        where service_date between {{ start_sql }} and {{ end_sql }} {{ republished_sql }}
         order by service_date
     {%- endset -%}
     {%- set urls = run_query(query).columns[0].values() | list -%}

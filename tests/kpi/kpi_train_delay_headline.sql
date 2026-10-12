@@ -65,7 +65,8 @@ tile as (
     select
         tiles.value_number,
         tiles.tile,
-        (select payload.tiles -> 0 ->> 'id' from {{ ref('board_payload') }} as payload) as first_tile_id
+        (select payload.tiles -> 0 ->> 'id' from {{ ref('board_payload') }} as payload) as first_tile_id,
+        (select payload.tiles -> 1 ->> 'id' from {{ ref('board_payload') }} as payload) as second_tile_id
     from {{ ref('board_tiles') }} as tiles
     where tiles.tile_id = 'train_delay_weekday'
 ),
@@ -84,7 +85,9 @@ tile_check as (
         or abs(cast(tile.tile ->> 'net_per_run_seconds' as double) - fact.per_run_net)
         > 1e-9 * greatest(abs(fact.per_run_net), 1)
         or (tile.tile ->> 'value_label') != {{ format_duration('tile.value_number') }}
-        or tile.first_tile_id != 'train_delay_weekday'
+        -- headline order: late trips share first, train delay second
+        or tile.first_tile_id != 'late_trip_share'
+        or tile.second_tile_id != 'train_delay_weekday'
 ),
 
 daily_check as (

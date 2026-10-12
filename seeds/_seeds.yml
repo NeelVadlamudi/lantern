@@ -76,6 +76,21 @@ seeds:
         data_tests:
           - unique
           - not_null
+  - name: board_methods
+    description: >
+      Definitions behind the board's measures with the source each follows (board_data.json methods).
+      source_url is empty where the definition is this project's own.
+    config:
+      column_types:
+        sort_order: integer
+    columns:
+      - name: method_id
+        data_tests:
+          - unique
+          - not_null
+      - name: definition
+        data_tests:
+          - not_null
   - name: board_sources
     description: Data sources listed on the board (board_data.json meta.sources), with their terms.
     config:

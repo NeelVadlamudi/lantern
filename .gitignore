@@ -15,3 +15,14 @@ _site/
 out/*.parquet
 out/*.json
 docs/dbt/
+# local only: secrets, local profiles, scratch and any DuckDB file outside warehouse/
+# (profiles.yml stays tracked: CI uses it, and it holds only a file path read from
+# MBTA_DUCKDB_PATH, no credentials)
+.env
+*.env
+.env.*
+profiles.local.yml
+scratch/
+*.duckdb
+*.duckdb.wal
+out/health_run.json

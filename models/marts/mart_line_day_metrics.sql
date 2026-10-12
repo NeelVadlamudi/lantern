@@ -1,4 +1,5 @@
--- Grain: one row per line scope ('system' or a GTFS route id), service date and measure.
+-- Grain: one row per line scope ('system', a GTFS route id, or 'Green' = the four Green Line
+-- branches combined), service date and measure.
 -- One day's plain figures with a typical value to compare against. Typical = the
 -- var('typical_days') (28) most recent earlier service dates of the same day type on which the
 -- scope had the measure (fewer near the start of the window; typical_days gives the count):
@@ -10,10 +11,63 @@
 --   train_delay_net_seconds, *_per_run_seconds       sum of max(run - scheduled, 0), net = sum of
 --                                                    (run - scheduled), per run = / runs_compared
 --   long_gaps, headway_observations, long_gap_share  mart_line_daily_reliability
+--   bunched_departures, gapped_departures,           mart_headway_adherence (SFMTA rules: under
+--   departures_compared, bunched_share, gapped_share 2 min / over scheduled + 5 min)
+--   scheduled_trips, completeness_share              mart_line_day_completeness (trips compared /
+--                                                    trips in the GTFS schedule for the date)
 -- Shares and per-run values are the day's own ratio (numerator / denominator, both given); the
 -- typical value is the median or mean of the earlier days' ratios.
 
-with line_days as (
+with adherence_days as (
+
+    select
+        scope_id,
+        service_date,
+        sum(departures_compared) as departures_compared,
+        sum(bunched_departures) as bunched_departures,
+        sum(gapped_departures) as gapped_departures
+    from {{ ref('mart_headway_adherence') }}
+    group by scope_id, service_date
+
+    union all
+
+    select
+        'Green' as scope_id,
+        service_date,
+        sum(departures_compared) as departures_compared,
+        sum(bunched_departures) as bunched_departures,
+        sum(gapped_departures) as gapped_departures
+    from {{ ref('mart_headway_adherence') }}
+    where scope_id like 'Green-%'
+    group by service_date
+
+),
+
+completeness_days as (
+
+    select
+        scope_id,
+        service_date,
+        scheduled_trips,
+        trips_compared as completeness_trips_compared
+    from {{ ref('mart_line_day_completeness') }}
+    where scheduled_trips > 0
+
+    union all
+
+    select
+        'Green' as scope_id,
+        service_date,
+        sum(scheduled_trips) as scheduled_trips,
+        sum(trips_compared) as completeness_trips_compared
+    from {{ ref('mart_line_day_completeness') }}
+    where scope_id like 'Green-%'
+    group by service_date
+    having sum(scheduled_trips) > 0
+
+),
+
+line_days as (
 
     select
         route_id as scope_id,
@@ -34,6 +88,19 @@ with line_days as (
         sum(long_gaps) as long_gaps,
         sum(headway_observations) as headway_observations
     from {{ ref('mart_line_daily_reliability') }}
+    group by service_date
+
+    union all
+
+    select
+        'Green' as scope_id,
+        service_date,
+        sum(late_trips) as late_trips,
+        sum(trips_compared) as trips_compared,
+        sum(long_gaps) as long_gaps,
+        sum(headway_observations) as headway_observations
+    from {{ ref('mart_line_daily_reliability') }}
+    where route_id like 'Green-%'
     group by service_date
 
 ),
@@ -72,9 +139,21 @@ delay_days as (
     from runs
     group by service_date
 
+    union all
+
+    select
+        'Green' as scope_id,
+        service_date,
+        count(*) as runs_compared,
+        sum(positive_excess_seconds) as positive_seconds,
+        sum(net_excess_seconds) as net_seconds
+    from runs
+    where route_id like 'Green-%'
+    group by service_date
+
 ),
 
-days as (
+joined_days as (
 
     select
         coalesce(line_days.scope_id, delay_days.scope_id) as scope_id,
@@ -91,6 +170,27 @@ days as (
         on
             line_days.scope_id = delay_days.scope_id
             and line_days.service_date = delay_days.service_date
+
+),
+
+days as (
+
+    select
+        joined_days.*,
+        adherence_days.departures_compared,
+        adherence_days.bunched_departures,
+        adherence_days.gapped_departures,
+        completeness_days.scheduled_trips,
+        completeness_days.completeness_trips_compared
+    from joined_days
+    left join adherence_days
+        on
+            joined_days.scope_id = adherence_days.scope_id
+            and joined_days.service_date = adherence_days.service_date
+    left join completeness_days
+        on
+            joined_days.scope_id = completeness_days.scope_id
+            and joined_days.service_date = completeness_days.service_date
 
 ),
 
@@ -111,6 +211,16 @@ measures as (
         ('headway_observations', 'count', 'headway_observations', 'null', 'null'),
         ('long_gap_share', 'share', 'long_gaps / nullif(headway_observations, 0)', 'long_gaps',
             'headway_observations'),
+        ('departures_compared', 'count', 'departures_compared', 'null', 'null'),
+        ('bunched_departures', 'count', 'bunched_departures', 'null', 'null'),
+        ('gapped_departures', 'count', 'gapped_departures', 'null', 'null'),
+        ('bunched_share', 'share', 'bunched_departures / nullif(departures_compared, 0)', 'bunched_departures',
+            'departures_compared'),
+        ('gapped_share', 'share', 'gapped_departures / nullif(departures_compared, 0)', 'gapped_departures',
+            'departures_compared'),
+        ('scheduled_trips', 'count', 'scheduled_trips', 'null', 'null'),
+        ('completeness_share', 'ratio', 'completeness_trips_compared / nullif(scheduled_trips, 0)',
+            'completeness_trips_compared', 'scheduled_trips'),
     ] %}
     {% for name, unit, expr, num, den in measures %}
         select

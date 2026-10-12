@@ -28,6 +28,13 @@
 -- depends_on: {{ ref('board_cr_monthly') }}
 -- depends_on: {{ ref('board_survey_lines') }}
 -- depends_on: {{ ref('board_freedom_trail') }}
+-- depends_on: {{ ref('board_headway_adherence') }}
+-- depends_on: {{ ref('board_line_day_completeness') }}
+-- depends_on: {{ ref('board_station_hour_heatmap_red') }}
+-- depends_on: {{ ref('board_station_hour_heatmap_orange') }}
+-- depends_on: {{ ref('board_station_hour_heatmap_blue') }}
+-- depends_on: {{ ref('board_station_hour_heatmap_green') }}
+-- depends_on: {{ ref('board_station_hour_heatmap_mattapan') }}
 -- Board summary: one row, one JSON column per top-level block of board_data.json. The
 -- on-run-end hook (macros/write_build_outputs.sql) adds the `build` block and COPYs this row
 -- to out/board_data.json. Runs after every Parquet export so `files` lists what was written.
@@ -93,6 +100,42 @@ latest_date as (
     where scope_id = 'system'
 ),
 
+-- the last date each source has data for, so the board can say what it covers
+data_through as (
+    select
+        json_object(
+            'subway', strftime(latest_date.service_date, '%Y-%m-%d'),
+            'subway_source', 'MBTA LAMP subway performance files (last service date loaded)',
+            'gated_entries', (
+                select strftime(max(src.service_date), '%Y-%m-%d') from {{ ref('stg_mbta__gated_entries') }} as src
+            ),
+            'cr_reliability', (
+                select strftime(max(src.service_date), '%Y-%m-%d') from {{ ref('stg_mbta__cr_reliability') }} as src
+            ),
+            'cr_boardings', (
+                select strftime(max(src.service_date), '%Y-%m-%d') from {{ ref('stg_mbta__cr_boardings') }} as src
+            ),
+            'survey', '2025 survey'
+        ) as data_through
+    from latest_date
+),
+
+methods as (
+    select
+        to_json(list(
+            json_object(
+                'id', method_id,
+                'name', name,
+                'definition', definition,
+                'used_here', used_here,
+                'source_name', source_name,
+                'source_url', source_url
+            )
+            order by sort_order
+        )) as methods
+    from {{ ref('board_methods') }}
+),
+
 meta as (
     select
         json_object(
@@ -105,6 +148,7 @@ meta as (
                 from {{ ref('stg_lamp__subway_trip_stops') }} as lamp
             ),
             'service_date', strftime(latest_date.service_date, '%Y-%m-%d'),
+            'data_through', data_through.data_through,
             'service_date_window', json_object(
                 'first', strftime(service_window.first_date, '%Y-%m-%d'),
                 'last', strftime(service_window.last_date, '%Y-%m-%d'),
@@ -138,6 +182,11 @@ meta as (
                 || ' type, better than usual below the 25th percentile (p25), and about usual from p25 to p75.'
                 || ' It is not rated (not_enough_data) with fewer than {{ var("usual_min_volume") }} trips,'
                 || ' runs or departures in the hour or fewer than {{ var("usual_min_typical_days") }} earlier days.',
+                'completeness_min_share', cast({{ var('completeness_min_share') }} as double),
+                'bunched_max_seconds', {{ var('bunched_max_seconds') }},
+                'gapped_extra_seconds', {{ var('gapped_extra_seconds') }},
+                'survey_min_respondents', {{ var('survey_min_respondents') }},
+                'tie_t', cast({{ var('tie_t') }} as double),
                 'histogram_min_minutes', {{ var('histogram_min_minutes') }},
                 'histogram_max_minutes', {{ var('histogram_max_minutes') }}
             ),
@@ -154,6 +203,7 @@ meta as (
     cross join row_counts
     cross join holidays
     cross join latest_date
+    cross join data_through
 ),
 
 tiles as (
@@ -1025,6 +1075,8 @@ latest_measures as (
                 'typical_median', metrics.typical_median,
                 'typical_median_label', metrics.typical_median_label,
                 'typical_mean', metrics.typical_mean,
+                'typical_p25', metrics.typical_p25,
+                'typical_p75', metrics.typical_p75,
                 'diff_vs_median', metrics.diff_vs_median,
                 'diff_vs_median_label', metrics.diff_vs_median_label,
                 'diff_vs_mean', metrics.diff_vs_mean
@@ -1034,7 +1086,8 @@ latest_measures as (
         max(metrics.numerator) filter (where metrics.measure = 'late_trip_share') as late_trips,
         max(metrics.denominator) filter (where metrics.measure = 'late_trip_share') as trips_compared,
         max(metrics.typical_median) filter (where metrics.measure = 'late_trip_share') as typical_late_share,
-        max(metrics.typical_days) filter (where metrics.measure = 'late_trip_share') as typical_days
+        max(metrics.typical_days) filter (where metrics.measure = 'late_trip_share') as typical_days,
+        max(metrics.value) filter (where metrics.measure = 'completeness_share') as completeness_share
     from {{ ref('board_line_day_metrics') }} as metrics
     inner join latest_date on metrics.service_date = latest_date.service_date
     group by metrics.scope_id
@@ -1094,10 +1147,13 @@ latest_day as (
     select
         json_object(
             'service_date', strftime(latest_date.service_date, '%Y-%m-%d'),
+            'data_through', strftime(latest_date.service_date, '%Y-%m-%d'),
             'day_type', latest_date.day_type,
             'typical_rule', 'Typical = median (and mean) of the same measure on the most recent'
             || ' {{ var("typical_days") }} earlier service dates of the same day type with data for'
-            || ' that line; diff = the day''s value minus the typical value.',
+            || ' that line; typical range = p25 to p75 of those days; diff = the day''s value minus the typical value.',
+            'completeness_rule', 'completeness_share = trips compared / trips in the GTFS schedule for the'
+            || ' date; is_low_completeness when below {{ var("completeness_min_share") }}.',
             'worst_segments_rule', 'The 3 segments with the most train delay that day (positive seconds'
             || ' over scheduled, summed over the day''s runs; ties by segment_id).',
             'worst_stations_rule', 'The 3 stations with the most long gaps between trains that day'
@@ -1106,17 +1162,35 @@ latest_day as (
                 'scope_id', measures.scope_id,
                 'scope_name', measures.scope_name,
                 'route_color_hex', measures.route_color_hex,
-                'comparison', format(
-                    '{:.1f}% of trips ran {} or more minutes late ({:,} of {:,});'
-                    || ' a typical {} over the last {} {}s: {:.1f}%.',
-                    100 * measures.late_share,
-                    {{ var('late_trip_seconds') }} // 60,
-                    cast(measures.late_trips as bigint),
-                    cast(measures.trips_compared as bigint),
-                    latest_date.day_type,
-                    measures.typical_days,
-                    latest_date.day_type,
-                    100 * measures.typical_late_share
+                -- with no earlier day of the same type (a holiday early in the window) the typical
+                -- value is null, so the sentence says there is nothing to compare with
+                'comparison', case
+                    when measures.typical_days > 0
+                        then format(
+                                '{:.1f}% of trips ran {} or more minutes late ({:,} of {:,});'
+                                || ' a typical {} over the last {} {}s: {:.1f}%.',
+                                100 * measures.late_share,
+                                {{ var('late_trip_seconds') }} // 60,
+                                cast(measures.late_trips as bigint),
+                                cast(measures.trips_compared as bigint),
+                                latest_date.day_type,
+                                measures.typical_days,
+                                latest_date.day_type,
+                                100 * measures.typical_late_share
+                            )
+                    else format(
+                            '{:.1f}% of trips ran {} or more minutes late ({:,} of {:,}); no earlier {}'
+                            || ' in the window to compare with.',
+                            100 * measures.late_share,
+                            {{ var('late_trip_seconds') }} // 60,
+                            cast(measures.late_trips as bigint),
+                            cast(measures.trips_compared as bigint),
+                            latest_date.day_type
+                        )
+                end,
+                'completeness_share', measures.completeness_share,
+                'is_low_completeness', coalesce(
+                    measures.completeness_share < {{ var('completeness_min_share') }}, false
                 ),
                 'measures', measures.measures,
                 'worst_segments', coalesce(segments.segments, json('[]')),
@@ -1233,6 +1307,15 @@ survey as (
 charts as (
     select json_object(
         'heatmap_files', ['line_hour_heatmap.parquet', 'station_hour_heatmap.parquet'],
+        'station_heatmap_files_by_line', json_object(
+            'Red', 'station_hour_heatmap_red.parquet',
+            'Orange', 'station_hour_heatmap_orange.parquet',
+            'Blue', 'station_hour_heatmap_blue.parquet',
+            'Green', 'station_hour_heatmap_green.parquet',
+            'Mattapan', 'station_hour_heatmap_mattapan.parquet'
+        ),
+        'headway_adherence_file', 'headway_adherence.parquet',
+        'completeness_file', 'line_day_completeness.parquet',
         'histogram_file', 'delay_histogram.parquet',
         'share_by_line_file', 'train_delay_by_line.parquet',
         'date_filter_file', 'line_day_metrics.parquet',
@@ -1271,6 +1354,7 @@ select
     decision.decision,
     coalesce(glossary.glossary, json('[]')) as glossary,
     latest_day.latest_day,
+    coalesce(methods.methods, json('[]')) as methods,
     commuter_rail.commuter_rail,
     survey.survey,
     charts.charts
@@ -1285,6 +1369,7 @@ cross join data_coverage
 cross join decision
 cross join glossary
 cross join latest_day
+cross join methods
 cross join commuter_rail
 cross join survey
 cross join charts

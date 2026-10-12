@@ -35,3 +35,18 @@
 {% macro board_round(column, digits) -%}
     cast(printf('%.{{ digits }}f', {{ column }}) as double)
 {%- endmacro %}
+
+{#- Clock hours gained (+1, fall back) or lost (-1, spring forward) in the early morning after a
+    service date: the DST change happens at 2 AM on the next calendar day, inside the late-night
+    service hours (24 and up) of this service date. On a fall-back night, service hour 25 holds
+    two clock hours (1:00-1:59 EDT and 1:00-1:59 EST), because service_hour() reads the Boston
+    wall clock; on a spring-forward night, service hour 26 is empty. 0 on every other date. -#}
+{% macro dst_extra_hours(date_column) -%}
+    cast(
+        (
+            epoch(timezone('America/New_York', cast({{ date_column }} + 1 as timestamp) + interval 4 hour))
+            - epoch(timezone('America/New_York', cast({{ date_column }} + 1 as timestamp)))
+        ) / 3600 - 4
+        as integer
+    )
+{%- endmacro %}
