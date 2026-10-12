@@ -9,7 +9,8 @@
 -- long_run_* and *_excl_long_runs split out runs over var('travel_outlier_seconds') (30 min):
 -- with + without = total, so the long runs can be read on their own. Runs that could not be
 -- compared are counted by reason (see mart_train_delay_daily). terminal_hold_* is the recorded
--- time on terminal platforms before departure, kept on its own and not part of the delay.
+-- time on terminal platforms before departure, kept on its own and not part of the delay; it
+-- includes the negative holds as recorded, which terminal_hold_negative_* also shows on their own.
 
 with daily as (
 
@@ -49,6 +50,9 @@ totals as (
         sum(terminal_departure_runs) as terminal_departure_runs,
         sum(terminal_hold_runs) as terminal_hold_runs,
         sum(terminal_hold_seconds_sum) as terminal_hold_seconds_sum,
+        sum(terminal_hold_negative_runs) as terminal_hold_negative_runs,
+        sum(terminal_hold_negative_seconds_sum) as terminal_hold_negative_seconds_sum,
+        sum(terminal_hold_positive_seconds_sum) as terminal_hold_positive_seconds_sum,
         sum(runs_actual_missing) as runs_actual_missing,
         sum(runs_scheduled_missing) as runs_scheduled_missing,
         sum(runs_actual_not_positive) as runs_actual_not_positive,
@@ -94,6 +98,11 @@ select
     cast(terminal_hold_runs as bigint) as terminal_hold_runs,
     cast(terminal_hold_seconds_sum as bigint) as terminal_hold_seconds_sum,
     cast(terminal_hold_seconds_sum / service_dates as double) as avg_daily_terminal_hold_seconds,
+    cast(terminal_hold_negative_runs as bigint) as terminal_hold_negative_runs,
+    cast(terminal_hold_negative_seconds_sum as bigint) as terminal_hold_negative_seconds_sum,
+    cast(terminal_hold_positive_seconds_sum as bigint) as terminal_hold_positive_seconds_sum,
+    cast(terminal_hold_negative_seconds_sum / service_dates as double) as avg_daily_terminal_hold_negative_seconds,
+    cast(terminal_hold_positive_seconds_sum / service_dates as double) as avg_daily_terminal_hold_positive_seconds,
     cast(runs_actual_missing as bigint) as runs_actual_missing,
     cast(runs_scheduled_missing as bigint) as runs_scheduled_missing,
     cast(runs_actual_not_positive as bigint) as runs_actual_not_positive,

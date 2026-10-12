@@ -1,0 +1,323 @@
+version: 2
+
+models:
+  - name: dim_cr_routes
+    description: >-
+      Grain: one row per Commuter Rail route (the 13 CR- routes with GTFS route_type 2), attributes from the GTFS version active on gtfs_as_of_date().
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: route_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id.'
+        data_tests:
+          - unique
+          - not_null
+      - name: route_name
+        data_type: varchar
+        description: 'Route name.'
+      - name: display_name
+        data_type: varchar
+        description: 'Display name.'
+      - name: transit_mode
+        data_type: varchar
+        description: 'Transit mode.'
+      - name: mode
+        data_type: varchar
+        description: 'Mode.'
+      - name: route_color_hex
+        data_type: varchar
+        description: 'Route color hex.'
+      - name: route_text_color_hex
+        data_type: varchar
+        description: 'Route text color hex.'
+      - name: route_sort_order
+        data_type: integer
+        description: 'Route sort order.'
+      - name: display_order
+        data_type: integer
+        description: 'Display order.'
+
+  - name: mart_cr_route_stops
+    description: >-
+      Grain: one row per Commuter Rail canonical pattern branch, direction and stop position, for the map.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: cr_route_stop_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id.'
+      - name: branch_route_id
+        data_type: varchar
+        description: 'Branch route id.'
+      - name: direction_id
+        data_type: integer
+        description: 'GTFS direction id.'
+      - name: route_pattern_name
+        data_type: varchar
+        description: 'Route pattern name.'
+      - name: route_pattern_id
+        data_type: varchar
+        description: 'Route pattern id.'
+      - name: stop_order
+        data_type: integer
+        description: 'Stop order.'
+      - name: stops_on_pattern
+        data_type: integer
+        description: 'Stops on pattern.'
+      - name: station_id
+        data_type: varchar
+        description: 'GTFS parent station id (place-*).'
+      - name: station_name
+        data_type: varchar
+        description: 'Station name.'
+      - name: latitude
+        data_type: double
+        description: 'Latitude.'
+      - name: longitude
+        data_type: double
+        description: 'Longitude.'
+      - name: route_color_hex
+        data_type: varchar
+        description: 'Route color hex.'
+      - name: gtfs_as_of_date
+        data_type: date
+        description: 'Gtfs as of date.'
+
+  - name: mart_cr_route_shapes
+    description: >-
+      Grain: one row per Commuter Rail canonical pattern branch, direction and track point, for the map.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: cr_shape_point_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id.'
+      - name: branch_route_id
+        data_type: varchar
+        description: 'Branch route id.'
+      - name: direction_id
+        data_type: integer
+        description: 'GTFS direction id.'
+      - name: shape_id
+        data_type: varchar
+        description: 'Shape id.'
+      - name: point_order
+        data_type: integer
+        description: 'Point order.'
+      - name: longitude
+        data_type: double
+        description: 'Longitude.'
+      - name: latitude
+        data_type: double
+        description: 'Latitude.'
+      - name: route_color_hex
+        data_type: varchar
+        description: 'Route color hex.'
+
+  - name: mart_cr_daily
+    description: >-
+      Grain: one row per Commuter Rail route and service date in the MBTA reliability file. Exact on-time and cancelled trip counts with their denominator, and the MBTAs estimated boardings.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: cr_route_day_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id.'
+      - name: service_date
+        data_type: date
+        description: 'Service date.'
+      - name: is_current_route
+        data_type: boolean
+        description: 'Is current route.'
+      - name: source_rows
+        data_type: bigint
+        description: 'Source rows.'
+      - name: source_line_names
+        data_type: varchar
+        description: 'Source line names.'
+      - name: peak_on_time_trips
+        data_type: bigint
+        description: 'Peak on time trips.'
+      - name: peak_counted_trips
+        data_type: bigint
+        description: 'Peak counted trips.'
+      - name: peak_cancelled_trips
+        data_type: bigint
+        description: 'Peak cancelled trips.'
+      - name: off_peak_on_time_trips
+        data_type: bigint
+        description: 'Off peak on time trips.'
+      - name: off_peak_counted_trips
+        data_type: bigint
+        description: 'Off peak counted trips.'
+      - name: off_peak_cancelled_trips
+        data_type: bigint
+        description: 'Off peak cancelled trips.'
+      - name: on_time_trips
+        data_type: bigint
+        description: 'On time trips.'
+      - name: counted_trips
+        data_type: bigint
+        description: 'Counted trips.'
+      - name: cancelled_trips
+        data_type: bigint
+        description: 'Cancelled trips.'
+      - name: on_time_share
+        data_type: double
+        description: 'On time share: exact numerator / denominator from the columns in this row.'
+      - name: cancelled_share
+        data_type: double
+        description: 'Cancelled share: exact numerator / denominator from the columns in this row.'
+      - name: estimated_boardings
+        data_type: double
+        description: 'Estimated boardings.'
+
+  - name: mart_cr_monthly
+    description: >-
+      Grain: one row per scope (commuter_rail = the 13 current routes, or a route id) and month. Exact sums and shares, and whether the files cover the whole month.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: cr_scope_month_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: scope_id
+        data_type: varchar
+        description: '''system'' (all subway routes) or a GTFS route id; for Commuter Rail and survey marts see the model description.'
+      - name: month_start_date
+        data_type: date
+        description: 'First day of the month.'
+      - name: month_end_date
+        data_type: date
+        description: 'Last day of the month.'
+      - name: reliability_days
+        data_type: bigint
+        description: 'Reliability days.'
+      - name: peak_on_time_trips
+        data_type: bigint
+        description: 'Peak on time trips.'
+      - name: peak_counted_trips
+        data_type: bigint
+        description: 'Peak counted trips.'
+      - name: off_peak_on_time_trips
+        data_type: bigint
+        description: 'Off peak on time trips.'
+      - name: off_peak_counted_trips
+        data_type: bigint
+        description: 'Off peak counted trips.'
+      - name: on_time_trips
+        data_type: bigint
+        description: 'On time trips.'
+      - name: counted_trips
+        data_type: bigint
+        description: 'Counted trips.'
+      - name: cancelled_trips
+        data_type: bigint
+        description: 'Cancelled trips.'
+      - name: on_time_share
+        data_type: double
+        description: 'On time share: exact numerator / denominator from the columns in this row.'
+      - name: peak_on_time_share
+        data_type: double
+        description: 'Peak on time share: exact numerator / denominator from the columns in this row.'
+      - name: off_peak_on_time_share
+        data_type: double
+        description: 'Off peak on time share: exact numerator / denominator from the columns in this row.'
+      - name: cancelled_share
+        data_type: double
+        description: 'Cancelled share: exact numerator / denominator from the columns in this row.'
+      - name: boardings_days
+        data_type: bigint
+        description: 'Boardings days.'
+      - name: estimated_boardings_sum
+        data_type: double
+        description: 'Estimated boardings sum.'
+      - name: avg_daily_estimated_boardings
+        data_type: double
+        description: 'Avg daily estimated boardings.'
+      - name: is_complete_reliability_month
+        data_type: boolean
+        description: 'Is complete reliability month.'
+      - name: is_complete_boardings_month
+        data_type: boolean
+        description: 'Is complete boardings month.'
+
+  - name: mart_survey_lines
+    description: >-
+      Grain: one row per line scope, measure and category of the MBTA 2025 System-Wide Passenger Survey, with respondents and margin of error.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: survey_line_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: scope_id
+        data_type: varchar
+        description: '''system'' (all subway routes) or a GTFS route id; for Commuter Rail and survey marts see the model description.'
+      - name: mode
+        data_type: varchar
+        description: 'Mode.'
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id.'
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line id.'
+      - name: survey_line_name
+        data_type: varchar
+        description: 'Survey line name.'
+      - name: measure_group
+        data_type: varchar
+        description: 'Measure group.'
+      - name: measure
+        data_type: varchar
+        description: 'Measure name.'
+      - name: category
+        data_type: varchar
+        description: 'Category.'
+      - name: weighted_share
+        data_type: double
+        description: 'Weighted share: exact numerator / denominator from the columns in this row.'
+      - name: respondents
+        data_type: bigint
+        description: 'Respondents.'
+      - name: margin_of_error
+        data_type: double
+        description: 'Margin of error.'
+      - name: survey_label
+        data_type: varchar
+        description: 'Always ''2025 survey''.'

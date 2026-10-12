@@ -79,6 +79,8 @@ models:
           - accepted_values:
               arguments:
                 values: [Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+              config:
+                where: "mode = 'subway'"
       - name: station_id
         description: GTFS parent station id (place-*), same as the MBTA V3 API stop id.
         data_tests:
@@ -114,6 +116,8 @@ models:
           - accepted_values:
               arguments:
                 values: [Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+              config:
+                where: "mode = 'subway'"
 
   - name: board_station_daily
     description: >
@@ -147,6 +151,8 @@ models:
           - accepted_values:
               arguments:
                 values: [Red, Mattapan, Orange, Green-B, Green-C, Green-D, Green-E, Blue]
+              config:
+                where: "mode = 'subway'"
       - name: point_order
         data_tests:
           - contiguous_sequence:
@@ -277,6 +283,27 @@ models:
       - name: label
         data_tests:
           - not_null
+
+  - name: board_line_day_metrics
+    description: "Parquet file out/line_day_metrics.parquet. Grain: one row per scope (system or route), service date and measure, with the typical value for the same day type and the difference. For the date filter."
+  - name: board_day_worst_segments
+    description: "Parquet file out/day_worst_segments.parquet. Grain: one row per scope, service date and rank 1 to 3: the segments with the most train delay that day, with typical values."
+  - name: board_day_worst_stations
+    description: "Parquet file out/day_worst_stations.parquet. Grain: one row per scope, service date and rank 1 to 3: the stations with the most long gaps that day, with typical values."
+  - name: board_line_hour_heatmap
+    description: "Parquet file out/line_hour_heatmap.parquet. Grain: one row per scope, service date and service hour (mart_line_hour_heatmap plus scope_name)."
+  - name: board_station_hour_heatmap
+    description: "Parquet file out/station_hour_heatmap.parquet. Grain: one row per station, line, service date and service hour (mart_station_hour_heatmap plus station_name)."
+  - name: board_delay_histogram
+    description: "Parquet file out/delay_histogram.parquet. Grain: one row per kind, scope, service date and non-empty 1-minute bin."
+  - name: board_train_delay_by_line
+    description: "Parquet file out/train_delay_by_line.parquet. Grain: one row per period and route; share_of_positive_excess adds up to 1 in each period."
+  - name: board_cr_daily
+    description: "Parquet file out/cr_daily.parquet. Grain: one row per Commuter Rail route and service date (mart_cr_daily). estimated_boardings is the MBTA's own estimate."
+  - name: board_cr_monthly
+    description: "Parquet file out/cr_monthly.parquet. Grain: one row per Commuter Rail scope and month (mart_cr_monthly)."
+  - name: board_survey_lines
+    description: "Parquet file out/survey_lines.parquet. Grain: one row per line scope, measure and category of the 2025 survey (mart_survey_lines)."
 
 unit_tests:
   - name: format_duration_unit_boundaries

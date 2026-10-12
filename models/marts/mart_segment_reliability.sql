@@ -16,7 +16,9 @@
 -- arrival-to-arrival time included and int_train_runs split out). For terminal
 -- arrivals LAMP has no timestamp for holding outside the terminal, so it stays in the run time
 -- (terminal_time_split = 'arrival_not_split'). Holds are as recorded: terminal_hold_negative_runs
--- counts runs where LAMP has the departure before the arrival.
+-- counts runs where LAMP has the departure before the arrival; their seconds are in
+-- terminal_hold_seconds_sum and avg_weekday_terminal_hold_seconds and also shown on their own in
+-- terminal_hold_negative_seconds_sum and avg_weekday_terminal_hold_negative_seconds.
 -- Riders: start_station_avg_weekday_entries = people entering the start station on this line
 -- through fare gates on an average weekday (int_station_period_riders, all periods). It counts
 -- entries at that station, not riders on this segment, and is null where the station has no
@@ -104,7 +106,11 @@ day_totals as (
         sum(terminal_hold_runs) as terminal_hold_runs,
         sum(terminal_hold_seconds_sum) as terminal_hold_seconds_sum,
         sum(terminal_hold_negative_runs) as terminal_hold_negative_runs,
+        sum(terminal_hold_negative_seconds_sum) as terminal_hold_negative_seconds_sum,
         sum(terminal_hold_seconds_sum) filter (where day_type = 'weekday') as weekday_terminal_hold_seconds_sum,
+        sum(terminal_hold_negative_runs) filter (where day_type = 'weekday') as weekday_terminal_hold_negative_runs,
+        sum(terminal_hold_negative_seconds_sum) filter (where day_type = 'weekday')
+            as weekday_terminal_hold_negative_seconds_sum,
         sum(terminal_hold_in_actual_seconds_sum) as terminal_hold_in_actual_seconds_sum
     from segment_days
     group by segment_id
@@ -182,6 +188,13 @@ combined as (
         coalesce(day_totals.terminal_hold_runs, 0) as terminal_hold_runs,
         coalesce(day_totals.terminal_hold_seconds_sum, 0) as terminal_hold_seconds_sum,
         coalesce(day_totals.terminal_hold_negative_runs, 0) as terminal_hold_negative_runs,
+        coalesce(day_totals.terminal_hold_negative_seconds_sum, 0) as terminal_hold_negative_seconds_sum,
+        coalesce(day_totals.weekday_terminal_hold_negative_runs, 0) as weekday_terminal_hold_negative_runs,
+        case
+            when day_totals.terminal_hold_runs > 0
+                then coalesce(day_totals.weekday_terminal_hold_negative_seconds_sum, 0)
+                    / nullif(window_dates.weekdays, 0)
+        end as avg_weekday_terminal_hold_negative_seconds,
         coalesce(day_totals.terminal_hold_in_actual_seconds_sum, 0) as terminal_hold_in_actual_seconds_sum,
         day_totals.terminal_hold_seconds_sum / nullif(day_totals.terminal_hold_runs, 0) as avg_terminal_hold_seconds,
         case
@@ -263,6 +276,9 @@ select
     cast(terminal_hold_runs as bigint) as terminal_hold_runs,
     cast(terminal_hold_seconds_sum as bigint) as terminal_hold_seconds_sum,
     cast(terminal_hold_negative_runs as bigint) as terminal_hold_negative_runs,
+    cast(terminal_hold_negative_seconds_sum as bigint) as terminal_hold_negative_seconds_sum,
+    cast(weekday_terminal_hold_negative_runs as bigint) as weekday_terminal_hold_negative_runs,
+    cast(avg_weekday_terminal_hold_negative_seconds as double) as avg_weekday_terminal_hold_negative_seconds,
     cast(terminal_hold_in_actual_seconds_sum as bigint) as terminal_hold_in_actual_seconds_sum,
     cast(avg_terminal_hold_seconds as double) as avg_terminal_hold_seconds,
     cast(avg_weekday_terminal_hold_seconds as double) as avg_weekday_terminal_hold_seconds,

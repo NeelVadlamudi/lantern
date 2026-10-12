@@ -17,7 +17,7 @@ vars:
   long_gap_ratio: 1.5          # actual headway / scheduled headway above this = long gap
   bunched_ratio: 0.5           # actual headway / scheduled headway below this = bunched
   late_trip_seconds: 300       # a trip running this much over its scheduled run time counts as late
-  travel_outlier_seconds: 1800 # a single stop-to-stop travel time above this is treated as a data error
+  travel_outlier_seconds: 1800 # a stop-to-stop run above this is a long run: kept in every figure and also shown on its own
   incremental_lookback_days: 3 # LAMP republishes recent days; reprocess this many trailing days
   rider_basis_days: 56         # days of gated entries used to estimate riders exposed
   # Decision metrics (rider time lost, segments, trends). See README "Decision metrics".
@@ -30,6 +30,13 @@ vars:
   cause_min_runs_per_day: 20   # schedule-or-service split: a day counts if the segment had this many runs
   cause_min_days: 20           # classify only segments with at least this many such days
   cause_dominance_ratio: 2     # 'schedule' if |median daily excess| >= ratio x IQR, 'service' if IQR >= ratio x |median|
+  # Latest day and charts (see README "One day against a typical day").
+  typical_days: 28             # typical value = the N most recent earlier service dates of the same day type
+  usual_min_volume: 20         # worse/about/better than usual only with at least this many trips, runs or departures
+  usual_min_typical_days: 4    # ... and at least this many earlier dates of the same day type
+  histogram_min_minutes: -15   # delay histogram: 1-minute bins from this ...
+  histogram_max_minutes: 30    # ... to this; values outside go to the open bins at each end
+  walk_speed_m_per_s: 1.4      # Freedom Trail walk estimate: straight-line metres / this speed
   # GTFS "as of" date (YYYYMMDD) for the station snapshot. Empty = latest loaded service date.
   gtfs_as_of: ""
 

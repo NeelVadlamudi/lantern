@@ -1,0 +1,106 @@
+version: 2
+
+models:
+  - name: mart_freedom_trail_nearest_stops
+    description: >-
+      Grain: one row per official Freedom Trail site, with the nearest subway or Commuter Rail station. Distance is
+      the straight-line (haversine) distance from the site point to the GTFS parent station point,
+      in exact metres. est_walk_seconds is an estimate: that distance divided by the walking speed in
+      the var walk_speed_m_per_s (1.4 m/s). It is not a routed or measured walking time.
+    config:
+      contract:
+        enforced: true
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "nearest_stop_id like 'place-%'"
+    columns:
+      - name: site_order
+        data_type: integer
+        description: Position of the site on the trail (seed freedom_trail_sites).
+        data_tests:
+          - unique
+          - not_null
+      - name: site_name
+        data_type: varchar
+        description: Site name as written on the Freedom Trail Foundation site list.
+        data_tests:
+          - not_null
+      - name: latitude
+        data_type: double
+        description: Site latitude, WGS84 decimal degrees.
+        data_tests:
+          - not_null
+      - name: longitude
+        data_type: double
+        description: Site longitude, WGS84 decimal degrees.
+        data_tests:
+          - not_null
+      - name: nearest_stop_id
+        data_type: varchar
+        description: GTFS parent station id (place-*) of the nearest station, same as the MBTA V3 API stop id.
+        data_tests:
+          - not_null
+      - name: nearest_stop_name
+        data_type: varchar
+        description: Station name from GTFS stops.txt.
+        data_tests:
+          - not_null
+      - name: nearest_stop_route_ids
+        data_type: varchar
+        description: Comma-separated GTFS route ids whose canonical pattern stops at the station (subway dim_stations.route_ids, then CR- routes).
+        data_tests:
+          - not_null
+      - name: nearest_stop_line_ids
+        data_type: varchar
+        description: Comma-separated subway trunk lines serving the station, Green for all Green Line branches (dim_stations.line_ids); null for a Commuter Rail only station.
+      - name: nearest_stop_modes
+        data_type: varchar
+        description: "Comma-separated modes serving the station: subway, commuter_rail or both."
+        data_tests:
+          - not_null
+      - name: distance_m
+        data_type: double
+        description: Straight-line (haversine) distance from the site to the station in metres, exact. Mean Earth radius 6,371,008.8 m.
+        data_tests:
+          - not_null
+      - name: est_walk_seconds
+        data_type: double
+        description: Estimated walking time in seconds, distance_m divided by walk_speed_m_per_s. An estimate, not measured.
+        data_tests:
+          - not_null
+      - name: walk_speed_m_per_s
+        data_type: double
+        description: Walking speed used for est_walk_seconds, from the var walk_speed_m_per_s.
+      - name: source_url
+        data_type: varchar
+        description: Wikidata item the site coordinates were taken from.
+        data_tests:
+          - not_null
+      - name: note
+        data_type: varchar
+        description: Which point is used when a site has more than one part, or other context.
+
+unit_tests:
+  - name: freedom_trail_nearest_station_is_closest
+    description: Each site gets the closer of two stations, and a distance tie goes to the lower station_id.
+    model: mart_freedom_trail_nearest_stops
+    given:
+      - input: ref('freedom_trail_sites')
+        rows:
+          - {site_order: 1, site_name: site a, latitude: 42.0, longitude: -71.0, source_url: x, note: null}
+          - {site_order: 2, site_name: site b, latitude: 42.1, longitude: -71.0, source_url: x, note: null}
+      - input: ref('dim_stations')
+        rows:
+          - {station_id: place-far, station_name: far, latitude: 42.05, longitude: -71.0, route_ids: Red, line_ids: Red}
+          - {station_id: place-near, station_name: near, latitude: 42.001, longitude: -71.0, route_ids: Red, line_ids: Red}
+          - {station_id: place-tie1, station_name: tie 1, latitude: 42.101, longitude: -71.0, route_ids: Red, line_ids: Red}
+          - {station_id: place-tie2, station_name: tie 2, latitude: 42.099, longitude: -71.0, route_ids: Red, line_ids: Red}
+      - input: ref('mart_cr_route_stops')
+        format: sql
+        rows: |
+          select 'CR-X' as route_id, 'place-crfar' as station_id, 'cr far' as station_name, 43.0 as latitude, -71.0 as longitude
+    expect:
+      rows:
+        - {site_order: 1, nearest_stop_id: place-near}
+        - {site_order: 2, nearest_stop_id: place-tie1}

@@ -28,7 +28,16 @@ select
     d.long_gaps,
     round(d.long_gap_share, 4) as long_gap_share,
     round(d.bunched_share, 4) as bunched_share,
-    round(d.headway_adherence_share, 4) as headway_adherence_share
+    round(d.headway_adherence_share, 4) as headway_adherence_share,
+    d.long_run_comparisons,
+    d.trips_with_long_runs,
+    d.long_run_excess_seconds_sum,
+    d.trips_compared_excl_long_runs,
+    d.late_trips_excl_long_runs,
+    d.late_trip_share_excl_long_runs,
+    d.avg_trip_excess_seconds_excl_long_runs,
+    d.trip_excess_seconds_sum_excl_long_runs,
+    d.trip_scheduled_seconds_sum_excl_long_runs
 from {{ ref('mart_line_daily_reliability') }} as d
 inner join {{ ref('dim_routes') }} as r
     on d.route_id = r.route_id

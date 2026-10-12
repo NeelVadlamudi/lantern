@@ -1,0 +1,556 @@
+version: 2
+
+models:
+  - name: mart_line_day_metrics
+    description: >-
+      Grain: one row per scope (system or route), service date and measure. Each days value with the typical value for the same day type over the earlier var typical_days dates with data, and the exact difference.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: line_day_measure_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: scope_id
+        data_type: varchar
+        description: '''system'' (all subway routes) or a GTFS route id; for Commuter Rail and survey marts see the model description.'
+      - name: service_date
+        data_type: date
+        description: 'Service date.'
+      - name: date_key
+        data_type: integer
+        description: 'Service date as YYYYMMDD.'
+      - name: day_type
+        data_type: varchar
+        description: 'weekday, saturday, sunday or holiday.'
+      - name: measure
+        data_type: varchar
+        description: 'Measure name.'
+      - name: unit
+        data_type: varchar
+        description: 'count, share or seconds.'
+      - name: value
+        data_type: double
+        description: 'The days value of the measure.'
+      - name: numerator
+        data_type: double
+        description: 'Numerator of a share or per-run value (null for plain counts).'
+      - name: denominator
+        data_type: double
+        description: 'Denominator of a share or per-run value (null for plain counts).'
+      - name: typical_days
+        data_type: bigint
+        description: 'Earlier service dates of the same day type used for the typical value (up to var typical_days).'
+      - name: typical_first_date
+        data_type: date
+        description: 'First date used for the typical value.'
+      - name: typical_last_date
+        data_type: date
+        description: 'Last date used for the typical value.'
+      - name: typical_median
+        data_type: double
+        description: 'Typical median.'
+      - name: typical_mean
+        data_type: double
+        description: 'Typical mean.'
+      - name: typical_p25
+        data_type: double
+        description: 'Typical p25.'
+      - name: typical_p75
+        data_type: double
+        description: 'Typical p75.'
+      - name: diff_vs_median
+        data_type: double
+        description: 'The days value minus the typical value named in the column.'
+      - name: diff_vs_mean
+        data_type: double
+        description: 'The days value minus the typical value named in the column.'
+
+  - name: mart_segment_day_delay
+    description: >-
+      Grain: one row per scope, service date and segment. Train delay on the segment that day, day_rank by positive seconds, and the typical value for the same day type.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: segment_day_scope_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: scope_id
+        data_type: varchar
+        description: '''system'' (all subway routes) or a GTFS route id; for Commuter Rail and survey marts see the model description.'
+      - name: service_date
+        data_type: date
+        description: 'Service date.'
+      - name: date_key
+        data_type: integer
+        description: 'Service date as YYYYMMDD.'
+      - name: day_type
+        data_type: varchar
+        description: 'weekday, saturday, sunday or holiday.'
+      - name: segment_id
+        data_type: varchar
+        description: 'Track segment id (dim_segments).'
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line id.'
+      - name: direction_id
+        data_type: integer
+        description: 'GTFS direction id.'
+      - name: from_station_id
+        data_type: varchar
+        description: 'From station id.'
+      - name: to_station_id
+        data_type: varchar
+        description: 'To station id.'
+      - name: runs_compared
+        data_type: bigint
+        description: 'Runs compared.'
+      - name: positive_excess_seconds
+        data_type: double
+        description: 'Positive excess seconds, exact.'
+      - name: net_excess_seconds
+        data_type: double
+        description: 'Net excess seconds, exact.'
+      - name: positive_excess_per_run_seconds
+        data_type: double
+        description: 'Positive excess per run seconds, exact.'
+      - name: net_excess_per_run_seconds
+        data_type: double
+        description: 'Net excess per run seconds, exact.'
+      - name: day_rank
+        data_type: bigint
+        description: 'Rank within scope and date (1 = worst).'
+      - name: typical_days
+        data_type: bigint
+        description: 'Earlier service dates of the same day type used for the typical value (up to var typical_days).'
+      - name: typical_median_positive_seconds
+        data_type: double
+        description: 'Typical median of positive_seconds over the earlier same-day-type dates.'
+      - name: typical_mean_positive_seconds
+        data_type: double
+        description: 'Typical mean of positive_seconds over the earlier same-day-type dates.'
+      - name: diff_vs_median_seconds
+        data_type: double
+        description: 'The days value minus the typical value named in the column.'
+      - name: diff_vs_mean_seconds
+        data_type: double
+        description: 'The days value minus the typical value named in the column.'
+
+  - name: mart_station_day_gaps
+    description: >-
+      Grain: one row per scope, service date and station. Long gaps and headway observations that day, day_rank by long gaps, and the typical value for the same day type.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: station_day_scope_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: scope_id
+        data_type: varchar
+        description: '''system'' (all subway routes) or a GTFS route id; for Commuter Rail and survey marts see the model description.'
+      - name: service_date
+        data_type: date
+        description: 'Service date.'
+      - name: date_key
+        data_type: integer
+        description: 'Service date as YYYYMMDD.'
+      - name: day_type
+        data_type: varchar
+        description: 'weekday, saturday, sunday or holiday.'
+      - name: station_id
+        data_type: varchar
+        description: 'GTFS parent station id (place-*).'
+      - name: headway_observations
+        data_type: bigint
+        description: 'Headway observations.'
+      - name: long_gaps
+        data_type: bigint
+        description: 'Long gaps.'
+      - name: long_gap_share
+        data_type: double
+        description: 'Long gap share: exact numerator / denominator from the columns in this row.'
+      - name: day_rank
+        data_type: bigint
+        description: 'Rank within scope and date (1 = worst).'
+      - name: typical_days
+        data_type: bigint
+        description: 'Earlier service dates of the same day type used for the typical value (up to var typical_days).'
+      - name: typical_median_long_gaps
+        data_type: double
+        description: 'Typical median of long_gaps over the earlier same-day-type dates.'
+      - name: typical_mean_long_gaps
+        data_type: double
+        description: 'Typical mean of long_gaps over the earlier same-day-type dates.'
+      - name: diff_vs_median_long_gaps
+        data_type: double
+        description: 'The days value minus the typical value named in the column.'
+      - name: diff_vs_mean_long_gaps
+        data_type: double
+        description: 'The days value minus the typical value named in the column.'
+      - name: typical_median_long_gap_share
+        data_type: double
+        description: 'Typical median of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_mean_long_gap_share
+        data_type: double
+        description: 'Typical mean of long_gap_share over the earlier same-day-type dates.'
+      - name: diff_vs_median_long_gap_share
+        data_type: double
+        description: 'The days value minus the typical value named in the column.'
+      - name: diff_vs_mean_long_gap_share
+        data_type: double
+        description: 'The days value minus the typical value named in the column.'
+
+  - name: mart_line_hour_heatmap
+    description: >-
+      Grain: one row per scope, service date and service hour. Trips, late trips, runs, train delay and gaps, with typical p25/median/p75/mean of the same hour and day type and the usual_* flags.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: line_hour_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: scope_id
+        data_type: varchar
+        description: '''system'' (all subway routes) or a GTFS route id; for Commuter Rail and survey marts see the model description.'
+      - name: service_date
+        data_type: date
+        description: 'Service date.'
+      - name: date_key
+        data_type: integer
+        description: 'Service date as YYYYMMDD.'
+      - name: day_type
+        data_type: varchar
+        description: 'weekday, saturday, sunday or holiday.'
+      - name: service_hour
+        data_type: integer
+        description: 'Hour after midnight at the start of the service date, Boston time (24 to 27 = after midnight).'
+      - name: trips_compared
+        data_type: bigint
+        description: 'Trips compared.'
+      - name: late_trips
+        data_type: bigint
+        description: 'Late trips.'
+      - name: late_trip_share
+        data_type: double
+        description: 'Late trip share: exact numerator / denominator from the columns in this row.'
+      - name: runs_compared
+        data_type: bigint
+        description: 'Runs compared.'
+      - name: train_delay_positive_seconds
+        data_type: double
+        description: 'Train delay positive seconds, exact.'
+      - name: train_delay_net_seconds
+        data_type: double
+        description: 'Train delay net seconds, exact.'
+      - name: train_delay_positive_per_run_seconds
+        data_type: double
+        description: 'Train delay positive per run seconds, exact.'
+      - name: train_delay_net_per_run_seconds
+        data_type: double
+        description: 'Train delay net per run seconds, exact.'
+      - name: headway_observations
+        data_type: bigint
+        description: 'Headway observations.'
+      - name: long_gaps
+        data_type: bigint
+        description: 'Long gaps.'
+      - name: long_gap_share
+        data_type: double
+        description: 'Long gap share: exact numerator / denominator from the columns in this row.'
+      - name: typical_days
+        data_type: bigint
+        description: 'Earlier service dates of the same day type used for the typical value (up to var typical_days).'
+      - name: typical_days_late_trip_share
+        data_type: bigint
+        description: 'Typical days of late_trip_share over the earlier same-day-type dates.'
+      - name: typical_p25_late_trip_share
+        data_type: double
+        description: 'Typical p25 of late_trip_share over the earlier same-day-type dates.'
+      - name: typical_median_late_trip_share
+        data_type: double
+        description: 'Typical median of late_trip_share over the earlier same-day-type dates.'
+      - name: typical_p75_late_trip_share
+        data_type: double
+        description: 'Typical p75 of late_trip_share over the earlier same-day-type dates.'
+      - name: typical_mean_late_trip_share
+        data_type: double
+        description: 'Typical mean of late_trip_share over the earlier same-day-type dates.'
+      - name: typical_days_train_delay_positive_per_run_seconds
+        data_type: bigint
+        description: 'Typical days of train_delay_positive_per_run_seconds over the earlier same-day-type dates.'
+      - name: typical_p25_train_delay_positive_per_run_seconds
+        data_type: double
+        description: 'Typical p25 of train_delay_positive_per_run_seconds over the earlier same-day-type dates.'
+      - name: typical_median_train_delay_positive_per_run_seconds
+        data_type: double
+        description: 'Typical median of train_delay_positive_per_run_seconds over the earlier same-day-type dates.'
+      - name: typical_p75_train_delay_positive_per_run_seconds
+        data_type: double
+        description: 'Typical p75 of train_delay_positive_per_run_seconds over the earlier same-day-type dates.'
+      - name: typical_mean_train_delay_positive_per_run_seconds
+        data_type: double
+        description: 'Typical mean of train_delay_positive_per_run_seconds over the earlier same-day-type dates.'
+      - name: typical_days_long_gap_share
+        data_type: bigint
+        description: 'Typical days of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_p25_long_gap_share
+        data_type: double
+        description: 'Typical p25 of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_median_long_gap_share
+        data_type: double
+        description: 'Typical median of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_p75_long_gap_share
+        data_type: double
+        description: 'Typical p75 of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_mean_long_gap_share
+        data_type: double
+        description: 'Typical mean of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_days_train_delay_positive_seconds
+        data_type: bigint
+        description: 'Typical days of train_delay_positive_seconds over the earlier same-day-type dates.'
+      - name: typical_p25_train_delay_positive_seconds
+        data_type: double
+        description: 'Typical p25 of train_delay_positive_seconds over the earlier same-day-type dates.'
+      - name: typical_median_train_delay_positive_seconds
+        data_type: double
+        description: 'Typical median of train_delay_positive_seconds over the earlier same-day-type dates.'
+      - name: typical_p75_train_delay_positive_seconds
+        data_type: double
+        description: 'Typical p75 of train_delay_positive_seconds over the earlier same-day-type dates.'
+      - name: typical_mean_train_delay_positive_seconds
+        data_type: double
+        description: 'Typical mean of train_delay_positive_seconds over the earlier same-day-type dates.'
+      - name: usual_late_trip_share
+        data_type: varchar
+        description: 'worse, about, better or not_enough_data: the hour against the typical p25 to p75 band of the same hour (see meta.thresholds.usual_rule).'
+      - name: usual_train_delay_per_run
+        data_type: varchar
+        description: 'worse, about, better or not_enough_data: the hour against the typical p25 to p75 band of the same hour (see meta.thresholds.usual_rule).'
+      - name: usual_long_gap_share
+        data_type: varchar
+        description: 'worse, about, better or not_enough_data: the hour against the typical p25 to p75 band of the same hour (see meta.thresholds.usual_rule).'
+
+  - name: mart_station_hour_heatmap
+    description: >-
+      Grain: one row per station, line, service date and service hour. Runs arriving at the station and departures from it, with typical values and usual_* flags.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: station_hour_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: station_id
+        data_type: varchar
+        description: 'GTFS parent station id (place-*).'
+      - name: line_id
+        data_type: varchar
+        description: 'Trunk line id.'
+      - name: service_date
+        data_type: date
+        description: 'Service date.'
+      - name: date_key
+        data_type: integer
+        description: 'Service date as YYYYMMDD.'
+      - name: day_type
+        data_type: varchar
+        description: 'weekday, saturday, sunday or holiday.'
+      - name: service_hour
+        data_type: integer
+        description: 'Hour after midnight at the start of the service date, Boston time (24 to 27 = after midnight).'
+      - name: runs_compared
+        data_type: bigint
+        description: 'Runs compared.'
+      - name: train_delay_positive_seconds
+        data_type: double
+        description: 'Train delay positive seconds, exact.'
+      - name: train_delay_net_seconds
+        data_type: double
+        description: 'Train delay net seconds, exact.'
+      - name: train_delay_positive_per_run_seconds
+        data_type: double
+        description: 'Train delay positive per run seconds, exact.'
+      - name: train_delay_net_per_run_seconds
+        data_type: double
+        description: 'Train delay net per run seconds, exact.'
+      - name: headway_observations
+        data_type: bigint
+        description: 'Headway observations.'
+      - name: long_gaps
+        data_type: bigint
+        description: 'Long gaps.'
+      - name: long_gap_share
+        data_type: double
+        description: 'Long gap share: exact numerator / denominator from the columns in this row.'
+      - name: typical_days
+        data_type: bigint
+        description: 'Earlier service dates of the same day type used for the typical value (up to var typical_days).'
+      - name: typical_days_train_delay_positive_per_run_seconds
+        data_type: bigint
+        description: 'Typical days of train_delay_positive_per_run_seconds over the earlier same-day-type dates.'
+      - name: typical_p25_train_delay_positive_per_run_seconds
+        data_type: double
+        description: 'Typical p25 of train_delay_positive_per_run_seconds over the earlier same-day-type dates.'
+      - name: typical_median_train_delay_positive_per_run_seconds
+        data_type: double
+        description: 'Typical median of train_delay_positive_per_run_seconds over the earlier same-day-type dates.'
+      - name: typical_p75_train_delay_positive_per_run_seconds
+        data_type: double
+        description: 'Typical p75 of train_delay_positive_per_run_seconds over the earlier same-day-type dates.'
+      - name: typical_mean_train_delay_positive_per_run_seconds
+        data_type: double
+        description: 'Typical mean of train_delay_positive_per_run_seconds over the earlier same-day-type dates.'
+      - name: typical_days_long_gap_share
+        data_type: bigint
+        description: 'Typical days of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_p25_long_gap_share
+        data_type: double
+        description: 'Typical p25 of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_median_long_gap_share
+        data_type: double
+        description: 'Typical median of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_p75_long_gap_share
+        data_type: double
+        description: 'Typical p75 of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_mean_long_gap_share
+        data_type: double
+        description: 'Typical mean of long_gap_share over the earlier same-day-type dates.'
+      - name: typical_days_train_delay_positive_seconds
+        data_type: bigint
+        description: 'Typical days of train_delay_positive_seconds over the earlier same-day-type dates.'
+      - name: typical_p25_train_delay_positive_seconds
+        data_type: double
+        description: 'Typical p25 of train_delay_positive_seconds over the earlier same-day-type dates.'
+      - name: typical_median_train_delay_positive_seconds
+        data_type: double
+        description: 'Typical median of train_delay_positive_seconds over the earlier same-day-type dates.'
+      - name: typical_p75_train_delay_positive_seconds
+        data_type: double
+        description: 'Typical p75 of train_delay_positive_seconds over the earlier same-day-type dates.'
+      - name: typical_mean_train_delay_positive_seconds
+        data_type: double
+        description: 'Typical mean of train_delay_positive_seconds over the earlier same-day-type dates.'
+      - name: usual_train_delay_per_run
+        data_type: varchar
+        description: 'worse, about, better or not_enough_data: the hour against the typical p25 to p75 band of the same hour (see meta.thresholds.usual_rule).'
+      - name: usual_long_gap_share
+        data_type: varchar
+        description: 'worse, about, better or not_enough_data: the hour against the typical p25 to p75 band of the same hour (see meta.thresholds.usual_rule).'
+
+  - name: mart_delay_histogram
+    description: >-
+      Grain: one row per kind, scope, service date and non-empty 1-minute bin of excess time. Open bins at each end; observations over all bins equal total_observations.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: histogram_bin_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: kind
+        data_type: varchar
+        description: '''trip'' (per-trip excess) or ''run'' (per stop-to-stop run excess).'
+      - name: scope_id
+        data_type: varchar
+        description: '''system'' (all subway routes) or a GTFS route id; for Commuter Rail and survey marts see the model description.'
+      - name: service_date
+        data_type: date
+        description: 'Service date.'
+      - name: date_key
+        data_type: integer
+        description: 'Service date as YYYYMMDD.'
+      - name: day_type
+        data_type: varchar
+        description: 'weekday, saturday, sunday or holiday.'
+      - name: bin_minute
+        data_type: integer
+        description: 'Lower edge of the 1-minute bin in minutes; the lowest and highest bins are open.'
+      - name: bin_start_seconds
+        data_type: integer
+        description: 'Bin start seconds, exact.'
+      - name: bin_end_seconds
+        data_type: integer
+        description: 'Bin end seconds, exact.'
+      - name: is_open_bin
+        data_type: boolean
+        description: 'True for the open bottom and top bins.'
+      - name: bin_label
+        data_type: varchar
+        description: 'Readable bin label.'
+      - name: observations
+        data_type: bigint
+        description: 'Observations.'
+      - name: excess_seconds_sum
+        data_type: double
+        description: 'Excess seconds sum.'
+      - name: total_observations
+        data_type: bigint
+        description: 'Total observations.'
+      - name: share_of_observations
+        data_type: double
+        description: 'Share of observations.'
+
+  - name: mart_train_delay_by_line
+    description: >-
+      Grain: one row per period (a date, all weekdays or all days) and route. Each routes positive train delay and its share of the subway total; shares in a period add up to 1.
+    config:
+      contract:
+        enforced: true
+    columns:
+      - name: line_period_key
+        data_type: varchar
+        description: 'Surrogate key of the row.'
+        data_tests:
+          - unique
+          - not_null
+      - name: period_kind
+        data_type: varchar
+        description: '''date'', ''weekday'' or ''all_days''.'
+      - name: service_date
+        data_type: date
+        description: 'Service date.'
+      - name: route_id
+        data_type: varchar
+        description: 'GTFS route id.'
+      - name: service_dates
+        data_type: bigint
+        description: 'Service dates.'
+      - name: runs_compared
+        data_type: bigint
+        description: 'Runs compared.'
+      - name: positive_excess_seconds
+        data_type: double
+        description: 'Positive excess seconds, exact.'
+      - name: net_excess_seconds
+        data_type: double
+        description: 'Net excess seconds, exact.'
+      - name: avg_daily_positive_excess_seconds
+        data_type: double
+        description: 'Avg daily positive excess seconds, exact.'
+      - name: system_positive_excess_seconds
+        data_type: double
+        description: 'System positive excess seconds, exact.'
+      - name: share_of_positive_excess
+        data_type: double
+        description: 'Share of positive excess.'

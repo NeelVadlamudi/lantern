@@ -46,8 +46,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: warehouse/mbta.duckdb
-          key: mbta-duckdb-v2-${{ github.run_id }}
-          restore-keys: mbta-duckdb-v2-
+          key: mbta-duckdb-v3-${{ github.run_id }}
+          restore-keys: mbta-duckdb-v3-
 
       - name: dbt deps
         run: dbt deps --profiles-dir .
@@ -87,7 +87,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: warehouse/mbta.duckdb
-          key: mbta-duckdb-v2-${{ github.run_id }}
+          key: mbta-duckdb-v3-${{ github.run_id }}
 
       - name: Docs
         run: |

@@ -42,3 +42,7 @@ group_by_and_order_by_style = consistent
 
 [sqlfluff:rules:convention.casting_style]
 preferred_type_casting_style = cast
+
+[sqlfluff:rules:references.keywords]
+# column names the board files use: mode (subway / commuter_rail), measure, unit, value; map is the seed alias
+ignore_words = mode, map, measure, unit, value

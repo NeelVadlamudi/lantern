@@ -1,0 +1,59 @@
+dataset,source_name,mode,route_id,line_id,note
+cr_reliability,Fairmount Line,commuter_rail,CR-Fairmount,,
+cr_reliability,Fairmount via Fairmount Line,commuter_rail,CR-Fairmount,,Listed only for 2025-12-26 to 2025-12-31
+cr_reliability,Fitchburg Line,commuter_rail,CR-Fitchburg,,
+cr_reliability,Foxboro Line,commuter_rail,CR-Foxboro,,Foxboro trains; GTFS calls the route Foxboro Event Service
+cr_reliability,Foxboro via Fairmount Line,commuter_rail,CR-Foxboro,,Foxboro trains running via the Fairmount Line
+cr_reliability,Franklin Line,commuter_rail,CR-Franklin,,GTFS long name Franklin/Foxboro Line
+cr_reliability,Franklin via Fairmount Line,commuter_rail,CR-Franklin,,Franklin trains running via the Fairmount Line
+cr_reliability,Greenbush Line,commuter_rail,CR-Greenbush,,
+cr_reliability,Haverhill Line,commuter_rail,CR-Haverhill,,
+cr_reliability,Haverhill via Wildcat Line,commuter_rail,CR-Haverhill,,Haverhill trains running via the Wildcat Branch
+cr_reliability,Kingston/Plymouth Line,commuter_rail,CR-Kingston,,Name used until 2025-03-23
+cr_reliability,Kingston Line,commuter_rail,CR-Kingston,,Name used from 2025-03-24
+cr_reliability,Lowell Line,commuter_rail,CR-Lowell,,
+cr_reliability,Middleborough/Lakeville Line,commuter_rail,CR-Middleborough,,Ran until 2025-03-23 and is not in the current GTFS; kept as its own route and out of the current-route totals
+cr_reliability,Needham Line,commuter_rail,CR-Needham,,
+cr_reliability,Fall River Line,commuter_rail,CR-NewBedford,,Fall River branch of the Fall River/New Bedford Line (from 2025-03-24)
+cr_reliability,New Bedford Line,commuter_rail,CR-NewBedford,,New Bedford branch of the Fall River/New Bedford Line (from 2025-03-24)
+cr_reliability,Newburyport Line,commuter_rail,CR-Newburyport,,Newburyport branch (listed separately from 2025-03-24)
+cr_reliability,Rockport Line,commuter_rail,CR-Newburyport,,Rockport branch (listed separately from 2025-03-24)
+cr_reliability,Newburyport/Rockport Line,commuter_rail,CR-Newburyport,,Both branches together (until 2025-03-23)
+cr_reliability,Providence Line,commuter_rail,CR-Providence,,Providence branch (listed separately from 2025-03-24)
+cr_reliability,Stoughton Line,commuter_rail,CR-Providence,,Stoughton branch (listed separately from 2025-03-24)
+cr_reliability,Stoughton via Fairmount Line,commuter_rail,CR-Providence,,Stoughton trains running via the Fairmount Line
+cr_reliability,Providence/Stoughton Line,commuter_rail,CR-Providence,,Both branches together (until 2025-03-23)
+cr_reliability,Worcester Line,commuter_rail,CR-Worcester,,Name used from 2025-03-24
+cr_reliability,Framingham/Worcester Line,commuter_rail,CR-Worcester,,Name used until 2025-03-23
+cr_reliability,CapeFLYER Line,commuter_rail,CapeFlyer,,Seasonal CapeFLYER (GTFS route CapeFlyer); not one of the 13 CR- routes; kept on its own and out of the Commuter Rail totals
+cr_boardings,Fairmount,commuter_rail,CR-Fairmount,,
+cr_boardings,Fall River/New Bedford,commuter_rail,CR-NewBedford,,
+cr_boardings,Fitchburg,commuter_rail,CR-Fitchburg,,
+cr_boardings,Framingham/Worcester,commuter_rail,CR-Worcester,,
+cr_boardings,Franklin/Foxboro,commuter_rail,CR-Franklin,,The MBTA reports Franklin and Foxboro trains together; they are counted on CR-Franklin and CR-Foxboro has no boardings of its own
+cr_boardings,Greenbush,commuter_rail,CR-Greenbush,,
+cr_boardings,Haverhill,commuter_rail,CR-Haverhill,,
+cr_boardings,Kingston,commuter_rail,CR-Kingston,,
+cr_boardings,Lowell,commuter_rail,CR-Lowell,,
+cr_boardings,Middleborough/Lakeville,commuter_rail,CR-Middleborough,,Ran until 2025-03-23; not in the current GTFS
+cr_boardings,Needham,commuter_rail,CR-Needham,,
+cr_boardings,Newburyport/Rockport,commuter_rail,CR-Newburyport,,
+cr_boardings,Providence/Stoughton,commuter_rail,CR-Providence,,
+survey,Rapid Transit or Bus Rapid Transit - Red Line,subway,,Red,Survey line total (All Red Line)
+survey,Rapid Transit or Bus Rapid Transit - Orange Line,subway,,Orange,Survey line total (All Orange Line)
+survey,Rapid Transit or Bus Rapid Transit - Blue Line,subway,,Blue,Survey line total (All Blue Line)
+survey,Rapid Transit or Bus Rapid Transit - Green Line,subway,,Green,Survey line total (All Green Line); the survey has no branch totals
+survey,Rapid Transit or Bus Rapid Transit - Mattapan Trolley,subway,,Mattapan,Survey line total (All Mattapan Trolley)
+survey,All Commuter Rail,commuter_rail,,,All Commuter Rail lines together (survey mode total)
+survey,Fairmount Line,commuter_rail,CR-Fairmount,,
+survey,Fall River/New Bedford Line,commuter_rail,CR-NewBedford,,
+survey,Fitchburg Line,commuter_rail,CR-Fitchburg,,
+survey,Framingham/Worcester Line,commuter_rail,CR-Worcester,,
+survey,Franklin/Foxboro Line,commuter_rail,CR-Franklin,,Includes Foxboro trains
+survey,Greenbush Line,commuter_rail,CR-Greenbush,,
+survey,Haverhill Line,commuter_rail,CR-Haverhill,,
+survey,Kingston Line,commuter_rail,CR-Kingston,,
+survey,Lowell Line,commuter_rail,CR-Lowell,,
+survey,Needham Line,commuter_rail,CR-Needham,,
+survey,Newburyport/Rockport Line,commuter_rail,CR-Newburyport,,
+survey,Providence/Stoughton Line,commuter_rail,CR-Providence,,

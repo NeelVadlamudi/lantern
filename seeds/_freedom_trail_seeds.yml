@@ -1,0 +1,42 @@
+version: 2
+
+seeds:
+  - name: freedom_trail_sites
+    description: >
+      The 16 official Freedom Trail sites in trail order, as listed by The Freedom Trail
+      Foundation (https://www.thefreedomtrail.org/trail-sites). One row per site. Coordinates are
+      WGS84 decimal degrees copied as recorded in the Wikidata coordinate location (P625) of the
+      item linked in source_url. Where one point stands for a site with two parts, note says which.
+    config:
+      column_types:
+        site_order: integer
+        site_name: varchar
+        latitude: double
+        longitude: double
+        source_url: varchar
+        note: varchar
+    columns:
+      - name: site_order
+        description: Position of the site on the trail, 1 = Boston Common, 16 = Bunker Hill Monument.
+        data_tests:
+          - unique
+          - not_null
+      - name: site_name
+        description: Site name as written on the Freedom Trail Foundation site list.
+        data_tests:
+          - unique
+          - not_null
+      - name: latitude
+        description: WGS84 latitude in decimal degrees, as recorded on the Wikidata item.
+        data_tests:
+          - not_null
+      - name: longitude
+        description: WGS84 longitude in decimal degrees, as recorded on the Wikidata item.
+        data_tests:
+          - not_null
+      - name: source_url
+        description: Wikidata item the coordinates were taken from.
+        data_tests:
+          - not_null
+      - name: note
+        description: Which point is used when a site has more than one part, or other context. Empty for most sites.

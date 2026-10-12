@@ -223,7 +223,11 @@
                 json('{{ tojson(build) | replace("'", "''") }}') as build,
                 coverage,
                 decision,
-                glossary
+                glossary,
+                latest_day,
+                commuter_rail,
+                survey,
+                charts
             from {{ payload }}
         ) to '{{ out_dir }}/board_data.json' (format json);
     {%- endcall -%}

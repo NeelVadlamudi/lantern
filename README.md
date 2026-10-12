@@ -486,29 +486,31 @@ Paths can be changed with `MBTA_DUCKDB_PATH` (warehouse file) and `MBTA_OUT_DIR`
 ## Findings
 
 Window: 90 service dates, 2026-07-09 to 2026-10-06. 3,641,449 train-at-stop records,
-352,266 train runs observed, 222,811 of them with at least one segment comparable to schedule.
+352,266 train runs observed, 222,858 of them with at least one segment comparable to schedule.
 The tests in `tests/kpi/` recompute each number below from the fact tables on every build.
 
 | Figure | All days | Weekdays | Definition |
 |---|---|---|---|
-| Late trips | **11.0%** | 11.9% | Share of compared train runs (222,811 on all days) more than 5 minutes over scheduled time |
-| Excess per trip | **+35.2 s** | +46.4 s | Average per train run; on all days 1.9% of an average 31-minute scheduled run (weekdays 2.4%) |
+| Late trips | **11.8%** | 12.5% | Share of compared train runs (26,191 of 222,858 on all days) more than 5 minutes over scheduled time. Stop-to-stop runs over 30 minutes are included; without them 11.0% (weekdays 11.9%) |
+| Excess per trip | **+62.9 s** | +71.1 s | Average per train run; on all days 3.4% of an average 31-minute scheduled run (weekdays 3.7%). 2,249 runs over 30 minutes add 6,174,366 s; without them +35.2 s (weekdays +46.4 s) |
 | Long gaps | **17.3%** | 17.9% | Share of departures (3,131,460 on all days) more than 1.5x the scheduled gap after the previous train |
 
 Weekdays exclude holidays (Labor Day, 2026-09-07, is the one holiday in the window).
 
 | Figure | Value | Definition |
 |---|---|---|
-| Weekday entries during long gaps | **about 50,300** | Of 302,700 average weekday gate entries at 68 gated stations (16.6%). Average over all days, weekends included: about 39,600 |
-| Red Line excess per trip | **+145.5 s** | Same per-trip grain as the system figure |
+| Weekday entries during long gaps | **about 50,300** | Of 302,700 average weekday gate entries at 68 gated stations (16.6%). Average over all days, weekends included: about 39,600. Of the 302,689 entries, 282,838 are at station/line/half-hour cells with recorded trains and 19,851 at cells with no recorded train that date (35.1 cells a weekday) |
+| Red Line excess per trip | **+151.9 s** | Same per-trip grain as the system figure (+145.5 s without runs over 30 minutes) |
 
 Line figures below are over all days; time-of-day and station figures say weekday where they are.
 
-- **Red Line is most often late: 20.9% of its trips are 5+ minutes over,** and it averages
-  145.5 s over per trip. Part of that is length: a Red Line trip is scheduled for 38 minutes on
-  average against 31 systemwide. Relative to scheduled time Red runs 6.3% over.
-- **Blue Line runs furthest over its schedule relative to trip length: 8.5%** (94 s on an
-  18-minute trip), but only 9.5% of its trips cross the fixed 5-minute line.
+- **Green Line D is most often late: 21.02% of its trips are 5+ minutes over (5,007 of 23,817),
+  just ahead of Red at 21.00% (7,804 of 37,163).** D averages 183.6 s over per trip, 6.6% of
+  scheduled time; 1,622 of its trips include a stop-to-stop run over 30 minutes, and without those
+  runs D is 15.3% late. Red averages 151.9 s over per trip (6.6%); without runs over 30 minutes
+  Red is 20.9% late and 145.5 s over.
+- **Blue Line runs furthest over its schedule relative to trip length: 9.0%** (99.0 s on an
+  18-minute trip), but only 9.6% of its trips cross the fixed 5-minute line.
 - Others, late share / excess vs schedule: Green D 15.3% / 1.0%, Green E 13.4% / -0.2%,
   Green B 9.8% / -0.3%, Green C 8.7% / -0.1%, Orange 5.6% / 1.6%, Mattapan 1.5% / -15.1%.
   Green branches average close to schedule but have a wide spread, so many trips still end up
@@ -563,6 +565,32 @@ Decision metrics (exact seconds in the files, labels as on the board):
   Park/West End (+109 s); stations: Science Park/West End (+170 s per rider), North Station
   (+163 s) and Lechmere (+105 s), all on the Green Line.
 
+## Latest day, charts, Commuter Rail and survey
+
+- **Latest day.** `board_data.json` `meta.service_date` is the latest service date with data and
+  `latest_day` gives that day's late trips, train delay, long gaps, worst 3 segments and worst 3
+  stations for the subway and each route, each with the typical value: median and mean of the
+  same measure on the 28 most recent earlier dates of the same day type (fewer early in the
+  window; `typical_days` says how many). `line_day_metrics.parquet`, `day_worst_segments.parquet`
+  and `day_worst_stations.parquet` have the same for every date.
+- **Charts.** `line_hour_heatmap.parquet` and `station_hour_heatmap.parquet` (hour x date, Boston
+  time), `delay_histogram.parquet` (1-minute bins of per-trip and per-run excess, open bins below
+  -15 and at 30 minutes or more) and `train_delay_by_line.parquet` (each line's share of positive
+  train delay). Heatmap hours are rated worse / about / better than usual against the p25 to p75
+  band of the same hour on the typical days, with at least 20 trips, runs or departures and 4
+  typical days (`meta.thresholds.usual_rule`).
+- **Commuter Rail.** The 13 CR- routes (GTFS route_type 2, color #80276C) are in `routes`,
+  `line_stops`, `line_shapes` and `map_stations` with a `mode` column (`modes` and `cr_route_ids`
+  on stations). `cr_daily.parquet` and `cr_monthly.parquet` hold the MBTA reliability counts
+  (on-time trips / trips counted, cancelled trips) and the MBTA's own estimated boardings. Line
+  names map to routes in `seeds/line_name_map.csv`. Commuter Rail is not part of train delay or
+  the segment ranking.
+- **2025 survey.** `survey_lines.parquet`: MBTA 2025 System-Wide Passenger Survey shares by
+  subway line (Red, Orange, Blue, Green, Mattapan) and Commuter Rail line, with respondents and
+  margin of error.
+- **Freedom Trail.** `freedom_trail.parquet` / `freedom_trail.json`: the 16 sites with the nearest
+  subway or Commuter Rail station, straight-line distance and an estimated walk time at 1.4 m/s.
+
 ## Limits
 
 Data coverage (`mart_data_coverage`, also in `out/board_data.json` under `coverage`):
@@ -608,10 +636,16 @@ Other limits:
 - The first observed segment of a trip and every run out of a terminal use departure-to-arrival
   time; the recorded time at the terminal platform is kept in `terminal_hold_seconds`. 542
   terminal holds are negative (LAMP records the departure before the arrival, as low as
-  -81,796 s); they are kept as recorded and counted in `terminal_hold_negative_runs`.
-- The trip-level figures above (late trips, excess per trip, line daily) are unchanged from the
-  first version: they still leave out stop-to-stop runs over 30 minutes
-  (`has_travel_comparison`). The train-delay and segment figures include those runs.
+  -81,796 s); they are kept as recorded and counted in `terminal_hold_negative_runs`. In each one
+  the arrival LAMP records at the starting terminal is later than the train's own departure from
+  it (the -81,796 s case: arrival at Boston College 2026-09-11 03:44, departure 2026-09-10 05:01),
+  so the arrival stamp belongs to another visit. The run itself is departure-to-arrival and is not
+  affected. Terminal hold totals include them as recorded (598 holds, -611,490 s, over all runs;
+  542 and -491,108 s on the canonical segments); `terminal_hold_negative_*` shows that part on its own.
+- Every figure includes stop-to-stop runs over 30 minutes. The trip-level figures also give the
+  part without them in `*_excl_long_runs` columns and the long runs in `long_run_*` columns.
+  Trip-level figures use arrival-to-arrival time without the terminal hold split that the
+  train-delay figures use.
 - Rider weights use gated entries only (2026-07-07 to 2026-08-31, the latest published). 68 of 125
   stations have gated data; surface Green Line stops and Mattapan have no fare gates, so their map
   values fall back to arrival-weighted averages (`has_rider_data = false`).

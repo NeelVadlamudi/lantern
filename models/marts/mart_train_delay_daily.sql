@@ -10,7 +10,10 @@
 --   net_excess_seconds = actual_run_seconds_sum - terminal_hold_in_actual_seconds_sum
 --                        - scheduled_run_seconds_sum
 -- terminal_hold_seconds_sum is all recorded time on terminal platforms before departure
--- (terminal_departure_runs runs), reported on its own and not part of the delay.
+-- (terminal_departure_runs runs), reported on its own and not part of the delay. Holds are as
+-- recorded: terminal_hold_negative_* counts and sums the holds where LAMP's arrival at the terminal
+-- is later than the departure from it (a timestamp problem), so
+-- terminal_hold_seconds_sum = terminal_hold_positive_seconds_sum + terminal_hold_negative_seconds_sum.
 -- A run is compared when both its actual and scheduled run times are positive. Runs over
 -- var('travel_outlier_seconds') (30 min) are included and also counted on their own in long_run_*.
 -- Runs that cannot be compared are counted by reason, never dropped silently:
@@ -46,6 +49,9 @@ daily as (
         count(*) filter (where is_terminal_departure) as terminal_departure_runs,
         count(terminal_hold_seconds) as terminal_hold_runs,
         sum(terminal_hold_seconds) as terminal_hold_seconds_sum,
+        count(*) filter (where terminal_hold_seconds < 0) as terminal_hold_negative_runs,
+        sum(terminal_hold_seconds) filter (where terminal_hold_seconds < 0) as terminal_hold_negative_seconds_sum,
+        sum(terminal_hold_seconds) filter (where terminal_hold_seconds > 0) as terminal_hold_positive_seconds_sum,
         count(*) filter (where run_comparison_status = 'actual_missing') as runs_actual_missing,
         count(*) filter (where run_comparison_status = 'scheduled_missing') as runs_scheduled_missing,
         count(*) filter (where run_comparison_status = 'actual_not_positive') as runs_actual_not_positive,
@@ -81,6 +87,9 @@ select
     cast(daily.terminal_departure_runs as bigint) as terminal_departure_runs,
     cast(daily.terminal_hold_runs as bigint) as terminal_hold_runs,
     cast(coalesce(daily.terminal_hold_seconds_sum, 0) as bigint) as terminal_hold_seconds_sum,
+    cast(daily.terminal_hold_negative_runs as bigint) as terminal_hold_negative_runs,
+    cast(coalesce(daily.terminal_hold_negative_seconds_sum, 0) as bigint) as terminal_hold_negative_seconds_sum,
+    cast(coalesce(daily.terminal_hold_positive_seconds_sum, 0) as bigint) as terminal_hold_positive_seconds_sum,
     cast(daily.runs_actual_missing as bigint) as runs_actual_missing,
     cast(daily.runs_scheduled_missing as bigint) as runs_scheduled_missing,
     cast(daily.runs_actual_not_positive as bigint) as runs_actual_not_positive,

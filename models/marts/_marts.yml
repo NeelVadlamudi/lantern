@@ -474,7 +474,7 @@ models:
                 severity: warn
       - name: excess_travel_seconds
         data_type: bigint
-        description: actual_run_seconds - scheduled_run_seconds. Null when the segment can't be compared.
+        description: 'actual_run_seconds - scheduled_run_seconds when has_travel_comparison (runs over 30 minutes included). Null when the segment can''t be compared.'
       - name: dwell_time_seconds
         data_type: bigint
         description: Seconds stopped at this stop (LAMP).
@@ -497,14 +497,13 @@ models:
         description: headway_seconds / scheduled_headway_seconds.
       - name: has_travel_comparison
         data_type: boolean
-        description: Both run times present, both above zero, actual not an outlier.
+        description: 'Both run times present and above zero. Runs over 30 minutes are compared too (see is_travel_outlier).'
       - name: has_headway_comparison
         data_type: boolean
         description: Both headways present and above zero.
       - name: is_travel_outlier
         data_type: boolean
-        description: actual_run_seconds above var('travel_outlier_seconds') (default 1800). Excluded from
-          travel metrics.
+        description: 'actual_run_seconds above var(''travel_outlier_seconds'') (default 1800): a long run. Included in every travel measure and shown on its own in the long_run_* columns.'
       - name: is_long_gap
         data_type: boolean
         description: Headway more than var('long_gap_ratio') times scheduled.
@@ -606,6 +605,24 @@ models:
       - name: is_late_trip
         data_type: boolean
         description: trip_excess_seconds above var('late_trip_seconds') (default 300).
+      - name: long_run_segments
+        data_type: bigint
+        description: 'Compared segments with a run over 30 minutes (is_travel_outlier).'
+      - name: long_run_excess_seconds
+        data_type: bigint
+        description: 'Excess seconds of those segments (0 when none). Part of trip_excess_seconds.'
+      - name: compared_segments_excl_long_runs
+        data_type: bigint
+        description: 'Compared segments without the runs over 30 minutes.'
+      - name: trip_excess_seconds_excl_long_runs
+        data_type: bigint
+        description: 'trip_excess_seconds without the runs over 30 minutes (null when no other segment was compared).'
+      - name: trip_scheduled_seconds_excl_long_runs
+        data_type: bigint
+        description: 'Scheduled seconds over the compared segments without the runs over 30 minutes.'
+      - name: is_late_trip_excl_long_runs
+        data_type: boolean
+        description: 'trip_excess_seconds_excl_long_runs above var(''late_trip_seconds''): the late-trip rule without runs over 30 minutes.'
   - name: mart_line_daily_reliability
     description: >-
       Daily reliability per line. Grain: one row per GTFS route and service date. Trip measures are per
@@ -737,6 +754,35 @@ models:
       - name: median_headway_ratio
         data_type: double
         description: Median of actual / scheduled trunk headway.
+      - name: long_run_comparisons
+        data_type: bigint
+        description: 'Compared segments with a run over 30 minutes. Included in travel_comparisons.'
+      - name: trips_with_long_runs
+        data_type: bigint
+        description: 'Trips with at least one run over 30 minutes.'
+      - name: long_run_excess_seconds_sum
+        data_type: bigint
+        description: 'Excess seconds of the runs over 30 minutes. Part of trip_excess_seconds_sum.'
+      - name: trips_compared_excl_long_runs
+        data_type: bigint
+        description: 'Trips with at least one compared segment that is not a run over 30 minutes.'
+      - name: late_trips_excl_long_runs
+        data_type: bigint
+        description: 'Late trips counting only segments that are not runs over 30 minutes.'
+      - name: late_trip_share_excl_long_runs
+        data_type: double
+        description: 'late_trips_excl_long_runs / trips_compared_excl_long_runs.'
+        data_tests:
+          - is_share
+      - name: avg_trip_excess_seconds_excl_long_runs
+        data_type: double
+        description: 'Average trip excess without the runs over 30 minutes.'
+      - name: trip_excess_seconds_sum_excl_long_runs
+        data_type: bigint
+        description: 'Sum of trip excess without the runs over 30 minutes.'
+      - name: trip_scheduled_seconds_sum_excl_long_runs
+        data_type: bigint
+        description: 'Scheduled seconds over the compared segments without the runs over 30 minutes.'
   - name: mart_period_reliability
     description: >-
       Reliability by time of day. Grain: one row per GTFS route, day type and service period over the

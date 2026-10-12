@@ -43,6 +43,29 @@ seeds:
       - name: route_or_line
         data_tests:
           - unique
+  - name: line_name_map
+    description: >
+      Maps the line names used by the Commuter Rail reliability and boardings files and the 2025
+      passenger survey to GTFS route ids (Commuter Rail) or line ids (subway). One row per dataset
+      and source name; note says why a name maps where it does. Names that are not in the
+      current GTFS (CR-Middleborough, CapeFlyer) keep their own id and stay out of the Commuter
+      Rail totals.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [dataset, source_name]
+    columns:
+      - name: dataset
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [cr_reliability, cr_boardings, survey]
+      - name: mode
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [subway, commuter_rail]
   - name: board_glossary
     description: Plain-language glossary shown on the board (board_data.json glossary).
     config:

@@ -105,3 +105,70 @@ sources:
             if var('use_sample', false)
             else 'https://mbta-massdot.opendata.arcgis.com/api/download/v1/items/2048258a18354256a650d41f8fe4532c/csv?layers=0') }}',
             header = true, all_varchar = true)
+      - name: mbta_cr_reliability
+        description: >
+          Commuter Rail reliability by route, day and peak/off-peak (hub item
+          ec18161c237d419698abc767f1be6a50, CSV). otp_numerator / otp_denominator are the trips
+          counted as on time and the trips counted, cancelled_numerator the cancelled trips, kept
+          apart so routes and days can be combined before dividing. Definitions: MBTA Performance
+          Dashboard and Service Delivery Policy.
+        config:
+          external_location: >-
+            read_csv('{{ var('cr_reliability_url', 'data/sample/opendata/cr_reliability.csv.gz'
+            if var('use_sample', false)
+            else 'https://www.arcgis.com/sharing/rest/content/items/ec18161c237d419698abc767f1be6a50/data') }}',
+            header = true, all_varchar = true)
+        columns:
+          - name: service_date
+            description: "Service date as M/D/YYYY."
+          - name: gtfs_route_id
+          - name: gtfs_route_long_name
+            description: Line or branch name; several names can share one route id (see seeds/line_name_map.csv).
+          - name: peak_offpeak_ind
+            description: PEAK or OFF_PEAK.
+          - name: metric_type
+          - name: otp_numerator
+          - name: otp_denominator
+          - name: cancelled_numerator
+      - name: mbta_cr_boardings
+        description: >
+          Commuter Rail ridership by service date and line (hub item 59b5c61e8e9f42f9a3745f7ad63d07d6,
+          CSV). estimated_boardings is the MBTA's own estimate from scaled conductor counts; values
+          are not guaranteed complete for every line or date.
+        config:
+          external_location: >-
+            read_csv('{{ var('cr_boardings_url', 'data/sample/opendata/cr_boardings.csv.gz'
+            if var('use_sample', false)
+            else 'https://www.arcgis.com/sharing/rest/content/items/59b5c61e8e9f42f9a3745f7ad63d07d6/data') }}',
+            header = true, all_varchar = true)
+        columns:
+          - name: servicedate
+            description: Service date as YYYY-MM-DD.
+          - name: line
+            description: Line name (see seeds/line_name_map.csv).
+          - name: estimated_boardings
+      - name: mbta_passenger_survey_2025
+        description: >
+          MBTA 2025 System-Wide Passenger Survey results (hub item 2dac9c48bd3440c2bcf2a220614c667b,
+          CSV download of layer 0). One row per aggregation level, service mode, reporting group,
+          measure and category, with the weighted share of riders, the respondents (n) and the
+          margin of error.
+        config:
+          external_location: >-
+            read_csv('{{ var('passenger_survey_url', 'data/sample/opendata/passenger_survey_2025.csv.gz'
+            if var('use_sample', false)
+            else 'https://mbta-massdot.opendata.arcgis.com/api/download/v1/items/2dac9c48bd3440c2bcf2a220614c667b/csv?layers=0') }}',
+            header = true, all_varchar = true)
+        columns:
+          - name: aggregation_level
+          - name: service_mode
+          - name: reporting_group
+          - name: measure_group
+          - name: measure
+          - name: category
+          - name: weighted_percent
+            description: Weighted share of riders in the category, 0 to 1.
+          - name: n
+            description: Respondents who were asked the question.
+          - name: margin_of_error
+            description: Margin of error of weighted_percent, 0 to 1.

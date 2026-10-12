@@ -1,6 +1,7 @@
 {{ config(severity='warn') }}
--- Stop-to-stop run times over var('travel_outlier_seconds') (default 30 minutes) are treated as
--- data errors or held trains and kept out of travel metrics. Counted here so the number is visible.
+-- Stop-to-stop run times over var('travel_outlier_seconds') (default 30 minutes): held trains,
+-- disruptions or data gaps. They are kept in every travel measure and flagged in the fact
+-- (is_travel_outlier); counted here so the number is visible in every run.
 select
     trip_stop_event_key,
     actual_run_seconds

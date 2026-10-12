@@ -152,3 +152,122 @@ models:
           - accepted_values:
               arguments:
                 values: [weekday, saturday, sunday, total]
+
+  - name: stg_gtfs__cr_trips
+    description: >
+      GTFS trips for the representative trips of canonical Commuter Rail route patterns (CR- routes).
+      Grain: one row per trip and archive validity range.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [trip_id, valid_from_date, valid_to_date]
+    columns:
+      - name: route_id
+        data_tests:
+          - not_null
+
+  - name: stg_gtfs__cr_stop_times
+    description: >
+      GTFS stop_times for the trips in stg_gtfs__cr_trips.
+      Grain: one row per trip, stop sequence and version.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [trip_id, stop_sequence, valid_from_date, valid_to_date]
+
+  - name: stg_gtfs__cr_shapes
+    description: >
+      GTFS shape points for the trips in stg_gtfs__cr_trips. Grain: one row per shape, point
+      sequence and archive validity range.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [shape_id, shape_point_sequence, valid_from_date, valid_to_date]
+
+  - name: stg_mbta__cr_reliability
+    description: >
+      Commuter Rail reliability counts. Grain: one row per source row (service date, route, line
+      or branch name, peak/off-peak); two branches can share a name before 2025-03-24, so the key
+      covers every column. on_time_trips / counted_trips are otp_numerator / otp_denominator;
+      cancelled_trips is cancelled_numerator.
+    columns:
+      - name: cr_reliability_row_key
+        data_tests:
+          - unique
+          - not_null
+      - name: service_date
+        data_tests:
+          - not_null
+      - name: source_route_id
+        data_tests:
+          - not_null
+      - name: source_line_name
+        data_tests:
+          - not_null
+      - name: peak_offpeak
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [PEAK, OFF_PEAK]
+      - name: on_time_trips
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: counted_trips
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+      - name: cancelled_trips
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+    data_tests:
+      - dbt_utils.expression_is_true:
+          arguments:
+            expression: "on_time_trips <= counted_trips"
+
+  - name: stg_mbta__cr_boardings
+    description: >
+      Commuter Rail boardings by line and day. estimated_boardings is the MBTA's own estimate
+      (scaled conductor counts). Grain: one row per service date and line name.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [service_date, source_line_name]
+    columns:
+      - name: source_line_name
+        data_tests:
+          - not_null
+      - name: estimated_boardings
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+
+  - name: stg_mbta__passenger_survey
+    description: >
+      MBTA 2025 System-Wide Passenger Survey. Grain: one row per aggregation level, service mode,
+      reporting group, measure and category.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [aggregation_level, service_mode, reporting_group, measure, category]
+    columns:
+      - name: weighted_share
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: respondents
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0

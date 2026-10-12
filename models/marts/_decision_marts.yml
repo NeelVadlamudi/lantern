@@ -648,6 +648,17 @@ models:
       - name: non_wait_gap_seconds
         data_type: double
         description: Sum of those gaps, seconds.
+      - name: cells_no_trains
+        data_type: bigint
+        description: 'Station, line and service-period cells of the date''s day type with a rider weight but no recorded train that date.'
+        data_tests:
+          - not_null
+      - name: gated_entries_no_trains
+        data_type: double
+        description: 'Average daily gated entries of those cells (the rider weight with no train to weight). Null when the date has no rider weight.'
+      - name: gated_entries_all_cells
+        data_type: double
+        description: 'gated_entries + gated_entries_no_trains: all gated entries for the day type (sum of int_station_period_riders).'
   - name: mart_rider_time_lost_weekly
     description: 'Weekly trend of estimated rider time lost. Grain: one row per week starting Monday.'
     config:
@@ -816,6 +827,21 @@ models:
       - name: terminal_hold_seconds_sum
         data_type: bigint
         description: Recorded time on terminal platforms before departure. Not part of the delay.
+      - name: terminal_hold_negative_runs
+        data_type: bigint
+        description: 'Terminal holds where LAMP records the departure before the arrival (a timestamp problem). Kept as recorded.'
+        data_tests:
+          - not_null
+      - name: terminal_hold_negative_seconds_sum
+        data_type: bigint
+        description: 'Sum of the negative terminal holds (zero or below): holds where LAMP records the departure before the arrival. Already inside terminal_hold_seconds_sum; shown on its own.'
+        data_tests:
+          - not_null
+      - name: terminal_hold_positive_seconds_sum
+        data_type: bigint
+        description: 'Sum of the positive terminal holds. terminal_hold_seconds_sum = terminal_hold_positive_seconds_sum + terminal_hold_negative_seconds_sum.'
+        data_tests:
+          - not_null
       - name: runs_actual_missing
         data_type: bigint
         description: Runs without an actual run time (a timestamp missing).
@@ -945,6 +971,27 @@ models:
       - name: avg_daily_terminal_hold_seconds
         data_type: double
         description: terminal_hold_seconds_sum / service_dates.
+      - name: terminal_hold_negative_runs
+        data_type: bigint
+        description: 'Terminal holds where LAMP records the departure before the arrival (a timestamp problem). Kept as recorded.'
+        data_tests:
+          - not_null
+      - name: terminal_hold_negative_seconds_sum
+        data_type: bigint
+        description: 'Sum of the negative terminal holds (zero or below): holds where LAMP records the departure before the arrival. Already inside terminal_hold_seconds_sum; shown on its own.'
+        data_tests:
+          - not_null
+      - name: terminal_hold_positive_seconds_sum
+        data_type: bigint
+        description: 'Sum of the positive terminal holds. terminal_hold_seconds_sum = terminal_hold_positive_seconds_sum + terminal_hold_negative_seconds_sum.'
+        data_tests:
+          - not_null
+      - name: avg_daily_terminal_hold_negative_seconds
+        data_type: double
+        description: 'terminal_hold_negative_seconds_sum / service_dates.'
+      - name: avg_daily_terminal_hold_positive_seconds
+        data_type: double
+        description: 'terminal_hold_positive_seconds_sum / service_dates.'
       - name: runs_actual_missing
         data_type: bigint
         description: Runs without an actual run time (a timestamp missing).
@@ -1060,6 +1107,16 @@ models:
         data_type: bigint
         description: Terminal holds where LAMP records the departure before the arrival (a timestamp problem). Kept
           as recorded.
+      - name: terminal_hold_negative_seconds_sum
+        data_type: bigint
+        description: 'Sum of the negative terminal holds (zero or below): holds where LAMP records the departure before the arrival. Already inside terminal_hold_seconds_sum; shown on its own.'
+        data_tests:
+          - not_null
+      - name: terminal_hold_positive_seconds_sum
+        data_type: bigint
+        description: 'Sum of the positive terminal holds. terminal_hold_seconds_sum = terminal_hold_positive_seconds_sum + terminal_hold_negative_seconds_sum.'
+        data_tests:
+          - not_null
       - name: terminal_hold_in_actual_seconds_sum
         data_type: bigint
         description: Terminal hold that was inside actual_run_seconds and was split out of the run (compared runs).
@@ -1212,6 +1269,19 @@ models:
         data_type: bigint
         description: Terminal holds where LAMP records the departure before the arrival (a timestamp problem). Kept
           as recorded.
+      - name: terminal_hold_negative_seconds_sum
+        data_type: bigint
+        description: 'Sum of the negative terminal holds (zero or below): holds where LAMP records the departure before the arrival. Already inside terminal_hold_seconds_sum; shown on its own. All days.'
+        data_tests:
+          - not_null
+      - name: weekday_terminal_hold_negative_runs
+        data_type: bigint
+        description: 'Negative terminal holds on weekdays.'
+        data_tests:
+          - not_null
+      - name: avg_weekday_terminal_hold_negative_seconds
+        data_type: double
+        description: 'Negative part of avg_weekday_terminal_hold_seconds: weekday sum of negative holds / weekdays in the window. Null where the segment has no recorded holds.'
       - name: terminal_hold_in_actual_seconds_sum
         data_type: bigint
         description: Terminal hold that was inside actual_run_seconds and was split out of the run (compared runs).

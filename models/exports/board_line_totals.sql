@@ -26,7 +26,16 @@ select
     sum(daily.trip_excess_seconds_sum)
     / sum(daily.trip_scheduled_seconds_sum) as excess_share_of_scheduled,
     sum(daily.trip_scheduled_seconds_sum)
-    / sum(daily.trips_compared) as avg_scheduled_trip_seconds
+    / sum(daily.trips_compared) as avg_scheduled_trip_seconds,
+    cast(sum(daily.late_trips) as bigint) as late_trips,
+    cast(sum(daily.trips_with_long_runs) as bigint) as trips_with_long_runs,
+    cast(sum(daily.long_run_excess_seconds_sum) as bigint) as long_run_excess_seconds_sum,
+    cast(sum(daily.trips_compared_excl_long_runs) as bigint) as trips_compared_excl_long_runs,
+    cast(sum(daily.late_trips_excl_long_runs) as bigint) as late_trips_excl_long_runs,
+    sum(daily.late_trips_excl_long_runs)
+    / sum(daily.trips_compared_excl_long_runs) as late_trip_share_excl_long_runs,
+    sum(daily.trip_excess_seconds_sum_excl_long_runs)
+    / sum(daily.trips_compared_excl_long_runs) as avg_trip_excess_seconds_excl_long_runs
 from {{ ref('mart_line_daily_reliability') }} as daily
 inner join {{ ref('dim_routes') }} as routes on daily.route_id = routes.route_id
 group by all

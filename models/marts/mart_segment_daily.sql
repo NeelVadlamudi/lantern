@@ -9,6 +9,8 @@
 -- scheduled); terminal_hold_in_actual_seconds_sum is the part of it that was inside
 -- actual_run_seconds and was split out (int_train_runs). terminal_hold_negative_runs counts holds where LAMP
 -- records the departure before the arrival (a timestamp problem); they are kept as recorded.
+-- terminal_hold_seconds_sum = terminal_hold_positive_seconds_sum + terminal_hold_negative_seconds_sum
+-- (the negative part is the sum of the negative holds, zero or below).
 -- No rider weighting here.
 
 with traversals as (
@@ -39,6 +41,10 @@ select
     cast(count(terminal_hold_seconds) as bigint) as terminal_hold_runs,
     cast(coalesce(sum(terminal_hold_seconds), 0) as bigint) as terminal_hold_seconds_sum,
     cast(count(*) filter (where terminal_hold_seconds < 0) as bigint) as terminal_hold_negative_runs,
+    cast(coalesce(sum(terminal_hold_seconds) filter (where terminal_hold_seconds < 0), 0) as bigint)
+        as terminal_hold_negative_seconds_sum,
+    cast(coalesce(sum(terminal_hold_seconds) filter (where terminal_hold_seconds > 0), 0) as bigint)
+        as terminal_hold_positive_seconds_sum,
     cast(coalesce(sum(terminal_hold_in_actual_seconds), 0) as bigint) as terminal_hold_in_actual_seconds_sum
 from traversals
 group by segment_id, line_id, service_date, date_key, day_type

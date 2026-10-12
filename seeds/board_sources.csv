@@ -3,3 +3,8 @@ sort_order,name,url,used_for,terms
 2,MBTA LAMP GTFS archive,https://performancedata.mbta.com/lamp/gtfs_archive/,"Stations, coordinates, routes, colors, stop order",MassDOT Developers License Agreement; see data/README.md
 3,MBTA Gated Station Entries (MBTA Open Data Portal),https://mbta-massdot.opendata.arcgis.com/datasets/001c177f07594e7c99f193dde32284c9,Rider exposure weights,CC0 (as listed on the item)
 4,MBTA Monthly Ridership by Mode and Line (MBTA Open Data Portal),https://mbta-massdot.opendata.arcgis.com/datasets/2048258a18354256a650d41f8fe4532c,"Context (staged, not on the board yet)",CC0 (as listed on the item)
+5,MBTA Commuter Rail Reliability (MBTA Open Data Portal),https://www.arcgis.com/home/item.html?id=ec18161c237d419698abc767f1be6a50,Commuter Rail on-time trips and cancellations by route and day,CC0 (as listed on the item)
+6,MBTA Commuter Rail Ridership by Service Date and Line (MBTA Open Data Portal),https://www.arcgis.com/home/item.html?id=59b5c61e8e9f42f9a3745f7ad63d07d6,Commuter Rail boardings by line and day (the MBTA's own estimate from scaled conductor counts),No license listed on the item; published on the MBTA Open Data Portal
+7,MBTA 2025 System-Wide Passenger Survey (MBTA Open Data Portal),https://mbta-massdot.opendata.arcgis.com/datasets/2dac9c48bd3440c2bcf2a220614c667b,Rider demographics by subway and Commuter Rail line (2025 survey),CC0 (as listed on the item)
+8,The Freedom Trail Foundation: Trail Sites,https://www.thefreedomtrail.org/trail-sites,"Freedom Trail site list and order",See site terms
+9,Wikidata coordinate location (P625),https://www.wikidata.org/,"Freedom Trail site coordinates",CC0

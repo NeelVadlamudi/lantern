@@ -1,5 +1,5 @@
 -- Each Parquet file listed in board_data.json `files` has the row count of the export model
--- that wrote it, and all seventeen export files are listed.
+-- that wrote it, and every export file is listed.
 with listed as (
     select
         listed_file ->> 'file' as file_name,
@@ -92,6 +92,61 @@ exported as (
         'suspension_gaps.parquet' as file_name,
         count(*) as n_rows
     from {{ ref('board_suspension_gaps') }}
+    union all
+    select
+        'line_day_metrics.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_line_day_metrics') }}
+    union all
+    select
+        'day_worst_segments.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_day_worst_segments') }}
+    union all
+    select
+        'day_worst_stations.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_day_worst_stations') }}
+    union all
+    select
+        'line_hour_heatmap.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_line_hour_heatmap') }}
+    union all
+    select
+        'station_hour_heatmap.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_station_hour_heatmap') }}
+    union all
+    select
+        'delay_histogram.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_delay_histogram') }}
+    union all
+    select
+        'train_delay_by_line.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_train_delay_by_line') }}
+    union all
+    select
+        'cr_daily.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_cr_daily') }}
+    union all
+    select
+        'cr_monthly.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_cr_monthly') }}
+    union all
+    select
+        'survey_lines.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_survey_lines') }}
+    union all
+    select
+        'freedom_trail.parquet' as file_name,
+        count(*) as n_rows
+    from {{ ref('board_freedom_trail') }}
 )
 
 select

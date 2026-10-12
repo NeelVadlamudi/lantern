@@ -1,0 +1,17 @@
+site_order,site_name,latitude,longitude,source_url,note
+1,Boston Common,42.355,-71.065555555,https://www.wikidata.org/wiki/Q49132,
+2,Massachusetts State House,42.357708333,-71.063563888,https://www.wikidata.org/wiki/Q1150259,
+3,Park Street Church,42.356944444,-71.062222222,https://www.wikidata.org/wiki/Q1139853,
+4,Granary Burying Ground,42.357410543,-71.06170577,https://www.wikidata.org/wiki/Q1140339,
+5,King's Chapel & King's Chapel Burying Ground,42.358055555,-71.06,https://www.wikidata.org/wiki/Q1139921,"Point is King's Chapel (Q1139921). The burying ground has its own point (Q1742174), about 27 m away."
+6,Boston Latin School Site/Benjamin Franklin Statue,42.357987449,-71.059597909,https://www.wikidata.org/wiki/Q49474378,Point is the Benjamin Franklin statue (Q49474378). The Freedom Trail Foundation states that the statue and a mosaic mark the site of the first schoolhouse.
+7,Old Corner Bookstore,42.357613137,-71.0585794,https://www.wikidata.org/wiki/Q387456,
+8,Old South Meeting House,42.356997155,-71.058420089,https://www.wikidata.org/wiki/Q773752,
+9,Old State House,42.35875,-71.057472222,https://www.wikidata.org/wiki/Q1320533,
+10,Boston Massacre Site,42.358777777,-71.057166666,https://www.wikidata.org/wiki/Q215687,Point is the location recorded on the Wikidata item for the Boston Massacre (Q215687).
+11,Faneuil Hall,42.359987,-71.056315,https://www.wikidata.org/wiki/Q49137,
+12,Paul Revere House,42.36375,-71.053666666,https://www.wikidata.org/wiki/Q2061878,
+13,Old North Church,42.366388888,-71.054444444,https://www.wikidata.org/wiki/Q1321240,
+14,Copp's Hill Burying Ground,42.367316825,-71.055889444,https://www.wikidata.org/wiki/Q1131544,
+15,USS Constitution,42.3721,-71.0556,https://www.wikidata.org/wiki/Q944436,Point is the location recorded on the Wikidata item for the ship (Q944436). The ship is in commission and can leave its berth.
+16,Bunker Hill Monument,42.376361111,-71.060777777,https://www.wikidata.org/wiki/Q1009561,

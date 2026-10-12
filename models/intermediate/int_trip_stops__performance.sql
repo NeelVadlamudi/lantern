@@ -16,7 +16,9 @@
 -- spans where an intermediate stop was not observed.
 -- Trunk headways are used (any train on the line), because that is the gap a rider on a shared
 -- trunk platform experiences. Rows fail a comparison (flag false, metric null) when either side
--- is missing, the scheduled value is zero or negative, or travel time is an outlier.
+-- is missing or zero or negative. Runs over var('travel_outlier_seconds') (30 minutes) are
+-- compared like any other run and flagged with is_travel_outlier, so every measure includes them
+-- and the marts can also show them on their own.
 
 with trip_stops as (
 
@@ -63,7 +65,6 @@ compared as (
         timed.actual_run_seconds > {{ var('travel_outlier_seconds') }} as is_travel_outlier,
         coalesce(
             timed.actual_run_seconds > 0
-            and timed.actual_run_seconds <= {{ var('travel_outlier_seconds') }}
             and timed.scheduled_run_seconds > 0,
             false
         ) as has_travel_comparison,

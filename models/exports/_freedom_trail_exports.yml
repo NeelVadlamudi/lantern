@@ -1,0 +1,33 @@
+version: 2
+
+models:
+  - name: board_freedom_trail
+    description: >-
+      Parquet file out/freedom_trail.parquet. Grain: one row per official Freedom Trail site, in
+      trail order, with the nearest subway or Commuter Rail station. distance_m is exact; distance_label rounds it
+      to whole metres. walk_label is an estimate (format_duration of est_walk_seconds at
+      walk_speed_m_per_s); walk_basis states this in words for the board.
+    columns:
+      - name: site_order
+        data_tests:
+          - unique
+          - not_null
+      - name: nearest_stop_id
+        description: GTFS parent station id (place-*), same as the MBTA V3 API stop id.
+        data_tests:
+          - not_null
+      - name: nearest_stop_route_ids
+        description: List of MBTA V3 API route ids serving the station.
+      - name: walk_label
+        data_tests:
+          - not_null
+
+  - name: board_freedom_trail_json
+    description: >-
+      JSON file out/freedom_trail.json (one array). Grain: one row per official Freedom Trail site.
+      Same rows and columns as out/freedom_trail.parquet.
+    columns:
+      - name: site_order
+        data_tests:
+          - unique
+          - not_null

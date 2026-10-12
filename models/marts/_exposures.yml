@@ -30,6 +30,18 @@ exposures:
       - ref('board_duration_label_cases')
       - ref('board_train_delay_daily')
       - ref('board_suspension_gaps')
+      - ref('board_line_day_metrics')
+      - ref('board_day_worst_segments')
+      - ref('board_day_worst_stations')
+      - ref('board_line_hour_heatmap')
+      - ref('board_station_hour_heatmap')
+      - ref('board_delay_histogram')
+      - ref('board_train_delay_by_line')
+      - ref('board_cr_daily')
+      - ref('board_cr_monthly')
+      - ref('board_survey_lines')
+      - ref('board_freedom_trail')
+      - ref('board_freedom_trail_json')
       - ref('board_payload')
     owner:
       name: Neel Vadlamudi

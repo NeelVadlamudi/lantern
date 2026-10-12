@@ -28,7 +28,16 @@ system_wide as (
         cast(sum(trips_compared) as bigint) as trips_compared,
         cast(sum(headway_observations) as bigint) as headway_observations,
         sum(trip_excess_seconds_sum) / sum(trip_scheduled_seconds_sum) as excess_share_of_scheduled,
-        sum(trip_scheduled_seconds_sum) / sum(trips_compared) as avg_scheduled_trip_seconds
+        sum(trip_scheduled_seconds_sum) / sum(trips_compared) as avg_scheduled_trip_seconds,
+        cast(sum(late_trips) as bigint) as late_trips,
+        cast(sum(trips_with_long_runs) as bigint) as trips_with_long_runs,
+        cast(sum(long_run_comparisons) as bigint) as long_run_comparisons,
+        cast(sum(long_run_excess_seconds_sum) as bigint) as long_run_excess_seconds_sum,
+        cast(sum(trips_compared_excl_long_runs) as bigint) as trips_compared_excl_long_runs,
+        cast(sum(late_trips_excl_long_runs) as bigint) as late_trips_excl_long_runs,
+        sum(late_trips_excl_long_runs) / sum(trips_compared_excl_long_runs) as late_trip_share_excl_long_runs,
+        sum(trip_excess_seconds_sum_excl_long_runs) / sum(trips_compared_excl_long_runs)
+            as avg_trip_excess_seconds_excl_long_runs
     from {{ ref('mart_line_daily_reliability') }}
 ),
 
@@ -38,7 +47,12 @@ weekday as (
         sum(late_trip_share * trips_compared) / sum(trips_compared) as late_trip_share,
         sum(avg_trip_excess_seconds * trips_compared) / sum(trips_compared) as avg_trip_excess_seconds,
         sum(long_gap_share * headway_observations) / sum(headway_observations) as long_gap_share,
-        sum(trip_excess_seconds_sum) / sum(trip_scheduled_seconds_sum) as excess_share_of_scheduled
+        sum(trip_excess_seconds_sum) / sum(trip_scheduled_seconds_sum) as excess_share_of_scheduled,
+        cast(sum(late_trips) as bigint) as late_trips,
+        cast(sum(trips_compared) as bigint) as trips_compared,
+        sum(late_trips_excl_long_runs) / sum(trips_compared_excl_long_runs) as late_trip_share_excl_long_runs,
+        sum(trip_excess_seconds_sum_excl_long_runs) / sum(trips_compared_excl_long_runs)
+            as avg_trip_excess_seconds_excl_long_runs
     from {{ ref('mart_line_daily_reliability') }}
     where day_type = 'weekday'
 ),
@@ -84,6 +98,9 @@ train_delay as (
         summary_weekday.avg_daily_positive_excess_seconds_excl_long_runs as weekday_excl_long_runs_seconds,
         summary_weekday.avg_daily_net_excess_seconds_excl_long_runs as weekday_excl_long_runs_net_seconds,
         summary_weekday.avg_daily_terminal_hold_seconds as weekday_terminal_hold_seconds,
+        summary_weekday.avg_daily_terminal_hold_negative_seconds as weekday_terminal_hold_negative_seconds,
+        summary_weekday.avg_daily_terminal_hold_positive_seconds as weekday_terminal_hold_positive_seconds,
+        summary_weekday.terminal_hold_negative_runs as weekday_terminal_hold_negative_runs,
         summary_all_days.service_dates,
         summary_all_days.avg_daily_positive_excess_seconds as all_days_seconds,
         summary_all_days.avg_daily_net_excess_seconds as all_days_net_seconds,
@@ -106,6 +123,9 @@ rider_time as (
         sum(rider_seconds_lost) filter (where day_type = 'weekday')
         / sum(gated_entries) filter (where day_type = 'weekday') as weekday_seconds_per_entry,
         avg(gated_entries) filter (where day_type = 'weekday') as weekday_gated_entries,
+        avg(gated_entries_no_trains) filter (where day_type = 'weekday') as weekday_gated_entries_no_trains,
+        avg(gated_entries_all_cells) filter (where day_type = 'weekday') as weekday_gated_entries_all_cells,
+        avg(cells_no_trains) filter (where day_type = 'weekday') as weekday_cells_no_trains,
         avg(rider_seconds_lost) as all_days_seconds,
         sum(rider_seconds_lost) / sum(gated_entries) as all_days_seconds_per_entry,
         count(*) filter (where day_type = 'weekday') as weekdays,
@@ -155,6 +175,9 @@ tiles as (
             'excl_long_runs_net_label', {{ format_duration('train_delay.weekday_excl_long_runs_net_seconds') }},
             'terminal_hold_seconds', train_delay.weekday_terminal_hold_seconds,
             'terminal_hold_label', {{ format_duration('train_delay.weekday_terminal_hold_seconds') }},
+            'terminal_hold_negative_seconds', train_delay.weekday_terminal_hold_negative_seconds,
+            'terminal_hold_positive_seconds', train_delay.weekday_terminal_hold_positive_seconds,
+            'terminal_hold_negative_runs', train_delay.weekday_terminal_hold_negative_runs,
             'all_days_value_seconds', train_delay.all_days_seconds,
             'all_days_value_label', {{ format_duration('train_delay.all_days_seconds') }},
             'all_days_net_seconds', train_delay.all_days_net_seconds,
@@ -210,6 +233,9 @@ tiles as (
             'per_entry_seconds', rider_time.weekday_seconds_per_entry,
             'per_entry_label', {{ format_duration('rider_time.weekday_seconds_per_entry') }},
             'gated_entries', rider_time.weekday_gated_entries,
+            'gated_entries_no_trains', rider_time.weekday_gated_entries_no_trains,
+            'gated_entries_all_cells', rider_time.weekday_gated_entries_all_cells,
+            'cells_no_trains', rider_time.weekday_cells_no_trains,
             'weekdays', rider_time.weekdays,
             'all_days_value_seconds', rider_time.all_days_seconds,
             'all_days_value_label', {{ format_duration('rider_time.all_days_seconds') }},
@@ -255,12 +281,23 @@ tiles as (
             'display', printf('%.1f%%', 100 * system_wide.late_trip_share),
             'value_weekday', {{ board_round('weekday.late_trip_share', 4) }},
             'display_weekday', printf('%.1f%%', 100 * weekday.late_trip_share),
+            'late_trips', system_wide.late_trips,
+            'trips_compared', system_wide.trips_compared,
+            'late_trips_weekday', weekday.late_trips,
+            'trips_compared_weekday', weekday.trips_compared,
+            'trips_with_long_runs', system_wide.trips_with_long_runs,
+            'value_excl_long_runs', system_wide.late_trip_share_excl_long_runs,
+            'late_trips_excl_long_runs', system_wide.late_trips_excl_long_runs,
+            'trips_compared_excl_long_runs', system_wide.trips_compared_excl_long_runs,
+            'value_weekday_excl_long_runs', weekday.late_trip_share_excl_long_runs,
             'sentence', 'Over all days, ' || printf('%.1f%%', 100 * system_wide.late_trip_share)
             || ' of train runs took more than 5 minutes longer than scheduled.',
             'explainer', 'Of ' || format('{:,}', system_wide.trips_compared)
             || ' subway train runs compared to the schedule on all days (weekdays, weekends and'
             || ' holidays), this share took more than 5 minutes longer than scheduled between their'
-            || ' first and last compared stops.'
+            || ' first and last compared stops. Stop-to-stop runs over 30 minutes are included ('
+            || format('{:,}', system_wide.trips_with_long_runs) || ' runs had one); without them the'
+            || ' share is ' || printf('%.1f%%', 100 * system_wide.late_trip_share_excl_long_runs) || '.'
         ) as tile
     from system_wide
     cross join weekday
@@ -287,6 +324,13 @@ tiles as (
             'value_label', {{ format_duration('system_wide.avg_trip_excess_seconds') }},
             'value_weekday_seconds', weekday.avg_trip_excess_seconds,
             'value_weekday_label', {{ format_duration('weekday.avg_trip_excess_seconds') }},
+            'long_run_comparisons', system_wide.long_run_comparisons,
+            'long_run_excess_seconds_sum', system_wide.long_run_excess_seconds_sum,
+            'value_excl_long_runs_seconds', system_wide.avg_trip_excess_seconds_excl_long_runs,
+            'value_excl_long_runs_label', {{ format_duration('system_wide.avg_trip_excess_seconds_excl_long_runs') }},
+            'value_weekday_excl_long_runs_seconds', weekday.avg_trip_excess_seconds_excl_long_runs,
+            'value_weekday_excl_long_runs_label',
+            {{ format_duration('weekday.avg_trip_excess_seconds_excl_long_runs') }},
             'sentence', 'Over all days, the average train run took '
             || {{ format_duration('abs(system_wide.avg_trip_excess_seconds)') }}
             || case when system_wide.avg_trip_excess_seconds < 0 then ' less' else ' longer' end
@@ -295,7 +339,9 @@ tiles as (
             || ' scheduled time summed over its compared stops, averaged over all compared runs. That is '
             || printf('%.1f%%', 100 * system_wide.excess_share_of_scheduled) || ' of an average '
             || printf('%.0f', system_wide.avg_scheduled_trip_seconds / 60)
-            || '-minute scheduled run. Small on average; the late tail is what riders feel.'
+            || '-minute scheduled run. Small on average; the late tail is what riders feel. Stop-to-stop'
+            || ' runs over 30 minutes are included; without them the average is '
+            || {{ format_duration('system_wide.avg_trip_excess_seconds_excl_long_runs') }} || '.'
         ) as tile
     from system_wide
     cross join weekday

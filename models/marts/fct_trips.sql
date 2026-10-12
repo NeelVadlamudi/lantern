@@ -2,6 +2,10 @@
 -- Trip-level schedule comparison over the stop-to-stop segments that could be compared.
 -- trip_excess_seconds is the sum of segment excess: how much longer the observed part of the
 -- trip took than its schedule. A trip is late when that exceeds var('late_trip_seconds').
+-- Stop-to-stop runs over var('travel_outlier_seconds') (30 minutes, is_travel_outlier) are
+-- included like every other compared run. Their part is also given on its own (long_run_*),
+-- and the *_excl_long_runs columns give the same measures without them, so
+-- trip_excess_seconds = trip_excess_seconds_excl_long_runs + long_run_excess_seconds.
 
 with events as (
 
@@ -25,6 +29,19 @@ select
     cast(count(*) filter (where has_travel_comparison) as bigint) as compared_segments,
     cast(sum(excess_travel_seconds) as bigint) as trip_excess_seconds,
     cast(sum(scheduled_run_seconds) filter (where has_travel_comparison) as bigint) as trip_scheduled_seconds,
-    cast(coalesce(sum(excess_travel_seconds) > {{ var('late_trip_seconds') }}, false) as boolean) as is_late_trip
+    cast(coalesce(sum(excess_travel_seconds) > {{ var('late_trip_seconds') }}, false) as boolean) as is_late_trip,
+    cast(count(*) filter (where has_travel_comparison and is_travel_outlier) as bigint) as long_run_segments,
+    cast(coalesce(sum(excess_travel_seconds) filter (where is_travel_outlier), 0) as bigint)
+        as long_run_excess_seconds,
+    cast(count(*) filter (where has_travel_comparison and not is_travel_outlier) as bigint)
+        as compared_segments_excl_long_runs,
+    cast(sum(excess_travel_seconds) filter (where not is_travel_outlier) as bigint)
+        as trip_excess_seconds_excl_long_runs,
+    cast(sum(scheduled_run_seconds) filter (where has_travel_comparison and not is_travel_outlier) as bigint)
+        as trip_scheduled_seconds_excl_long_runs,
+    cast(coalesce(
+        sum(excess_travel_seconds) filter (where not is_travel_outlier) > {{ var('late_trip_seconds') }},
+        false
+    ) as boolean) as is_late_trip_excl_long_runs
 from events
 group by trip_key

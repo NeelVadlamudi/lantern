@@ -7,6 +7,11 @@
 -- mart_station_rider_time_lost and fct_suspension_gaps). The gaps themselves are counted in
 -- suspension_gap_* (all), waited_gap_* (kept as passenger waits) and non_wait_gap_* (shown by
 -- the recorded data not to be waits); suspension = waited + non-wait.
+-- Gate entries reconcile to the rider weights: gated_entries is the weight of the cells with
+-- recorded trains that date; gated_entries_no_trains is the weight of the station, line and
+-- period cells of the date's day type that had no recorded train (counted in cells_no_trains),
+-- and gated_entries_all_cells = gated_entries + gated_entries_no_trains, the sum of
+-- int_station_period_riders for the day type. The no-train part adds nothing to rider time lost.
 
 with cells as (
 
@@ -24,6 +29,48 @@ dates as (
         holiday_name,
         week_start_date
     from {{ ref('dim_dates') }}
+
+),
+
+riders as (
+
+    select
+        station_id,
+        line_id,
+        day_type,
+        service_period_id,
+        cast(avg_daily_gated_entries as double) as avg_daily_gated_entries
+    from {{ ref('int_station_period_riders') }}
+
+),
+
+cell_keys as (
+
+    select distinct
+        station_id,
+        line_id,
+        date_key,
+        service_period_id
+    from cells
+
+),
+
+no_train_cells as (
+
+    select
+        dates.date_key,
+        count(*) as cells_no_trains,
+        sum(riders.avg_daily_gated_entries) as gated_entries_no_trains
+    from dates
+    inner join riders on dates.day_type = riders.day_type
+    left join cell_keys
+        on
+            riders.station_id = cell_keys.station_id
+            and riders.line_id = cell_keys.line_id
+            and dates.date_key = cell_keys.date_key
+            and riders.service_period_id = cell_keys.service_period_id
+    where cell_keys.station_id is null
+    group by dates.date_key
 
 ),
 
@@ -74,6 +121,15 @@ select
     cast(daily.waited_gap_count as bigint) as waited_gap_count,
     cast(daily.waited_gap_seconds as double) as waited_gap_seconds,
     cast(daily.non_wait_gap_count as bigint) as non_wait_gap_count,
-    cast(daily.non_wait_gap_seconds as double) as non_wait_gap_seconds
+    cast(daily.non_wait_gap_seconds as double) as non_wait_gap_seconds,
+    cast(coalesce(no_train_cells.cells_no_trains, 0) as bigint) as cells_no_trains,
+    cast(case
+        when daily.station_cells_with_riders > 0 then coalesce(no_train_cells.gated_entries_no_trains, 0)
+    end as double) as gated_entries_no_trains,
+    cast(case
+        when daily.station_cells_with_riders > 0
+            then daily.gated_entries + coalesce(no_train_cells.gated_entries_no_trains, 0)
+    end as double) as gated_entries_all_cells
 from daily
 inner join dates on daily.date_key = dates.date_key
+left join no_train_cells on daily.date_key = no_train_cells.date_key

@@ -4,6 +4,9 @@
 -- excess_share_of_scheduled (excess / scheduled run time) is included to compare lines fairly.
 -- The *_sum and count columns are additive across dates; shares and averages are not.
 -- day_type (weekday / saturday / sunday / holiday) comes from dim_dates.
+-- Stop-to-stop runs over 30 minutes are included in every measure. long_run_* gives their part
+-- and *_excl_long_runs the same trip measures without them (the definition before they were
+-- included), so both views come from one table.
 
 with events as (
 
@@ -49,7 +52,19 @@ trip_stats as (
         count(*) filter (where compared_segments > 0 and is_late_trip) as late_trips,
         sum(trip_excess_seconds) filter (where compared_segments > 0) as trip_excess_seconds_sum,
         sum(trip_scheduled_seconds) filter (where compared_segments > 0) as trip_scheduled_seconds_sum,
-        avg(cast(is_late_trip as int)) filter (where compared_segments > 0) as late_trip_share
+        avg(cast(is_late_trip as int)) filter (where compared_segments > 0) as late_trip_share,
+        sum(long_run_segments) as long_run_comparisons,
+        count(*) filter (where long_run_segments > 0) as trips_with_long_runs,
+        sum(long_run_excess_seconds) as long_run_excess_seconds_sum,
+        count(*) filter (where compared_segments_excl_long_runs > 0) as trips_compared_excl_long_runs,
+        count(*) filter (where compared_segments_excl_long_runs > 0 and is_late_trip_excl_long_runs)
+            as late_trips_excl_long_runs,
+        avg(trip_excess_seconds_excl_long_runs) filter (where compared_segments_excl_long_runs > 0)
+            as avg_trip_excess_seconds_excl_long_runs,
+        sum(trip_excess_seconds_excl_long_runs) filter (where compared_segments_excl_long_runs > 0)
+            as trip_excess_seconds_sum_excl_long_runs,
+        sum(trip_scheduled_seconds_excl_long_runs) filter (where compared_segments_excl_long_runs > 0)
+            as trip_scheduled_seconds_sum_excl_long_runs
     from trips
     group by route_id, service_date
 
@@ -81,7 +96,19 @@ select
     cast(event_stats.long_gap_share as double) as long_gap_share,
     cast(event_stats.bunched_share as double) as bunched_share,
     cast(event_stats.headway_adherence_share as double) as headway_adherence_share,
-    cast(event_stats.median_headway_ratio as double) as median_headway_ratio
+    cast(event_stats.median_headway_ratio as double) as median_headway_ratio,
+    cast(coalesce(trip_stats.long_run_comparisons, 0) as bigint) as long_run_comparisons,
+    cast(coalesce(trip_stats.trips_with_long_runs, 0) as bigint) as trips_with_long_runs,
+    cast(coalesce(trip_stats.long_run_excess_seconds_sum, 0) as bigint) as long_run_excess_seconds_sum,
+    cast(coalesce(trip_stats.trips_compared_excl_long_runs, 0) as bigint) as trips_compared_excl_long_runs,
+    cast(coalesce(trip_stats.late_trips_excl_long_runs, 0) as bigint) as late_trips_excl_long_runs,
+    cast(
+        trip_stats.late_trips_excl_long_runs / nullif(trip_stats.trips_compared_excl_long_runs, 0) as double
+    ) as late_trip_share_excl_long_runs,
+    cast(trip_stats.avg_trip_excess_seconds_excl_long_runs as double) as avg_trip_excess_seconds_excl_long_runs,
+    cast(trip_stats.trip_excess_seconds_sum_excl_long_runs as bigint) as trip_excess_seconds_sum_excl_long_runs,
+    cast(trip_stats.trip_scheduled_seconds_sum_excl_long_runs as bigint)
+        as trip_scheduled_seconds_sum_excl_long_runs
 from event_stats
 left join trip_stats
     on event_stats.route_id = trip_stats.route_id
