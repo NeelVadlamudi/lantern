@@ -23,6 +23,7 @@ inputs). Each row: the case, what happened, why, the fix, and the test that now 
 | 15 | Column renamed in the Commuter Rail file (`otp_numerator` to `otp_num`) | Build fails: `Referenced column "otp_numerator" not found` | Schema change upstream | Already fails; existing rows kept on refresh | dbt model error |
 | 16 | Column renamed in the survey file (`weighted_percent` to `weighted_pct`) | Build fails: `Referenced column "weighted_percent" not found` | Same | Already fails | dbt model error |
 | 17 | Workflow files did not parse as YAML | GitHub would reject both workflows | `run:` lines with `--vars '{a: b}'` are not valid plain YAML | Those lines are now block scalars (`run: \|`) | parsed in the checks before commit |
+| 18 | Leak scan on the built site | Scan failed on the generated dbt docs page | dbt's bundled app code (CSS and library messages) matched the wording patterns | Wording check skips third-party bundles (dbt/index.html, assets/vendor/); path, email, secret, symlink and debug checks still cover them | `scripts/leak_scan.sh` run on the publish folder |
 
 Note on 12: in the scratch test the republished file was given a last_modified later than the
 load, so the test still reported it after the reload; with real timestamps the reload clears it.
