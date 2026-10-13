@@ -232,3 +232,21 @@ models:
       - name: is_planned_change
         description: 'True for the rows built from line-days with a planned service change.'
         data_tests: [not_null]
+
+  - name: mart_station_reliability_planned
+    description: >-
+      Station reliability by time of day, split on planned service changes. Grain: one row per
+      station, line, day type, service period and is_planned_change over the loaded window. Same
+      measures as mart_station_reliability (macros/station_reliability.sql); each station-day
+      takes is_planned_change from its line's scope-day in mart_planned_change_scope_days.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [station_id, line_id, day_type, service_period_id, is_planned_change]
+    columns:
+      - name: station_period_key
+        description: 'Surrogate key: station_id, line_id, day_type, service_period_id, is_planned_change.'
+        data_tests: [unique, not_null]
+      - name: is_planned_change
+        description: 'True for the rows built from days when the line had a planned service change.'
+        data_tests: [not_null]

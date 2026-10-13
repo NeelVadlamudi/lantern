@@ -3,7 +3,9 @@
         location=env_var('MBTA_OUT_DIR', 'out') ~ '/station_time_lost.parquet'
     )
 }}
--- Board file: estimated rider time lost per station, line, day type and service period,
+-- Board file: estimated rider time lost per station, line, day type, service period and
+-- is_planned_change (the line had a planned service change that day: mart_planned_change_scope_days,
+-- scope_type 'line'; rows with false leave planned days out),
 -- averaged per service date of that day type (mart_station_rider_time_lost). Excess wait and
 -- excess ride per rider are pooled over the dates (summed headways and segment excess), so
 -- they are the same formulas as the daily cells. Rider time lost is per average day of that
@@ -11,22 +13,32 @@
 -- Wait is given without the gaps over 1 hour (no suffix) and with the ones that count as
 -- passenger waits (*_with_gaps); the gaps are counted in suspension_gap_* and non_wait_gap_*.
 -- share_of_total_rider_time_lost = the row's rider time lost (wait + ride) / the sum over all
--- rows of the same day type. Not clamped: a row with net negative time lost has a negative share.
+-- rows of the same day type and is_planned_change. Not clamped: a row with net negative time lost has a negative share.
 
 with cells as (
 
-    select * from {{ ref('mart_station_rider_time_lost') }}
+    select
+        cells.*,
+        planned.is_planned_change
+    from {{ ref('mart_station_rider_time_lost') }} as cells
+    inner join {{ ref('mart_planned_change_scope_days') }} as planned
+        on planned.scope_type = 'line' and cells.line_id = planned.scope_id and cells.service_date = planned.service_date
 
 ),
 
 dates_per_type as (
 
+    -- dates with a rider weight, per line, day type and planned flag
     select
-        day_type,
+        planned.scope_id as line_id,
+        daily.day_type,
+        planned.is_planned_change,
         count(*) as service_dates
-    from {{ ref('mart_rider_time_lost_daily') }}
-    where has_rider_data
-    group by day_type
+    from {{ ref('mart_rider_time_lost_daily') }} as daily
+    inner join {{ ref('mart_planned_change_scope_days') }} as planned
+        on planned.scope_type = 'line' and daily.service_date = planned.service_date
+    where daily.has_rider_data
+    group by planned.scope_id, daily.day_type, planned.is_planned_change
 
 ),
 
@@ -37,6 +49,7 @@ pooled as (
         line_id,
         day_type,
         service_period_id,
+        is_planned_change,
         sum(headway_observations) as headway_observations,
         sum(suspension_gap_count) as suspension_gap_count,
         sum(suspension_gap_seconds) as suspension_gap_seconds,
@@ -60,7 +73,7 @@ pooled as (
         max(gated_entries) as gated_entries,
         sum(rider_seconds_lost) as rider_seconds_lost
     from cells
-    group by station_id, line_id, day_type, service_period_id
+    group by station_id, line_id, day_type, service_period_id, is_planned_change
 
 ),
 
@@ -78,14 +91,18 @@ averaged as (
             when pooled.has_rider_data then pooled.rider_seconds_lost_with_gaps / dates_per_type.service_dates
         end as avg_daily_rider_seconds_lost_with_gaps,
         case when pooled.has_rider_data then pooled.rider_seconds_lost end
-        / sum(case when pooled.has_rider_data then pooled.rider_seconds_lost end) over (partition by pooled.day_type)
+        / sum(case when pooled.has_rider_data then pooled.rider_seconds_lost end) over (partition by pooled.day_type, pooled.is_planned_change)
             as share_of_total_rider_time_lost,
         case when pooled.has_rider_data then pooled.rider_seconds_lost_with_gaps end
         / sum(case when pooled.has_rider_data then pooled.rider_seconds_lost_with_gaps end)
-            over (partition by pooled.day_type)
+            over (partition by pooled.day_type, pooled.is_planned_change)
             as share_of_total_rider_time_lost_with_gaps
     from pooled
-    left join dates_per_type on pooled.day_type = dates_per_type.day_type
+    left join dates_per_type
+        on
+            pooled.line_id = dates_per_type.line_id
+            and pooled.day_type = dates_per_type.day_type
+            and pooled.is_planned_change = dates_per_type.is_planned_change
 
 )
 
@@ -95,6 +112,7 @@ select
     averaged.line_id,
     averaged.day_type,
     averaged.service_period_id,
+    averaged.is_planned_change,
     averaged.headway_observations,
     averaged.suspension_gap_count,
     averaged.suspension_gap_seconds,
@@ -129,4 +147,4 @@ select
     averaged.share_of_total_rider_time_lost_with_gaps
 from averaged
 left join {{ ref('dim_stations') }} as stations on averaged.station_id = stations.station_id
-order by averaged.station_id, averaged.line_id, averaged.day_type, averaged.service_period_id
+order by averaged.station_id, averaged.line_id, averaged.day_type, averaged.service_period_id, averaged.is_planned_change

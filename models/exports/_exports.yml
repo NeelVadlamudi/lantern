@@ -22,6 +22,10 @@ models:
   - name: board_line_periods
     description: "Parquet file out/line_periods.parquet. Grain: one row per route, day type, service period and is_planned_change (false rows leave out planned line-days)."
     columns:
+      - name: is_planned_change
+        description: True for rows built from days when the line had a planned service change.
+        data_tests:
+          - not_null
       - name: route_id
         description: MBTA V3 API route id.
         data_tests:
@@ -35,8 +39,12 @@ models:
             combination_of_columns: [route_id, day_type, service_period_id, is_planned_change]
 
   - name: board_station_periods
-    description: "Parquet file out/station_periods.parquet. Grain: one row per station, trunk line, day type and service period."
+    description: "Parquet file out/station_periods.parquet. Grain: one row per station, trunk line, day type, service period and is_planned_change (false rows leave out planned line-days)."
     columns:
+      - name: is_planned_change
+        description: True for rows built from days when the line had a planned service change.
+        data_tests:
+          - not_null
       - name: station_id
         description: GTFS parent station id (place-*), same as the MBTA V3 API stop id.
         data_tests:
@@ -47,7 +55,7 @@ models:
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: [station_id, line_id, day_type, service_period_id]
+            combination_of_columns: [station_id, line_id, day_type, service_period_id, is_planned_change]
 
   - name: board_map_stations
     description: "Parquet file out/map_stations.parquet. Grain: one row per station on the subway network."
@@ -231,11 +239,16 @@ models:
           - not_null
 
   - name: board_station_time_lost
-    description: "Parquet file out/station_time_lost.parquet. Grain: one row per station, line, day type and service period."
+    description: "Parquet file out/station_time_lost.parquet. Grain: one row per station, line, day type, service period and is_planned_change (false rows leave out planned line-days)."
+    columns:
+      - name: is_planned_change
+        description: True for rows built from days when the line had a planned service change.
+        data_tests:
+          - not_null
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
-            combination_of_columns: [station_id, line_id, day_type, service_period_id]
+            combination_of_columns: [station_id, line_id, day_type, service_period_id, is_planned_change]
 
   - name: board_station_trend
     description: "Parquet file out/station_trend.parquet. Grain: one row per station and line."
