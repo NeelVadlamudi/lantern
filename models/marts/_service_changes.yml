@@ -60,6 +60,9 @@ models:
         description: 'Alert whose text describes the row: the alert itself, or for a DIV timetable the planned alert on the same route and date (shuttle or suspension first, then lower alert id).'
       - name: display_effect_detail
         description: 'effect_detail of display_alert_id.'
+      - name: display_effect_label
+        description: 'Reader label of the row effect (seed alert_effect_labels; DIV rows: Diversion timetable).'
+        data_tests: [not_null]
       - name: alert_header
         description: 'header_text of display_alert_id (null when no planned alert covers the date).'
       - name: from_station_id

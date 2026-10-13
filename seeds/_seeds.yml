@@ -142,3 +142,15 @@ seeds:
         data_tests:
           - unique
           - not_null
+  - name: alert_effect_labels
+    description: >-
+      Reader labels for the effect detail codes of MBTA service alerts (LAMP_RT_ALERTS
+      effect_detail), plus DIVERSION_TIMETABLE for GTFS diversion timetable rows (service_id
+      starting DIV). Every code in the alerts archive is listed.
+    columns:
+      - name: effect_code
+        description: effect_detail code, or DIVERSION_TIMETABLE.
+        data_tests: [unique, not_null]
+      - name: effect_label
+        description: Plain label shown to readers.
+        data_tests: [not_null]

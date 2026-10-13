@@ -29,6 +29,8 @@
 --   row shows itself; a diversion timetable row shows the planned alert on the same route and
 --   service date that is not a station closure (shuttle or suspension first, then the lower alert
 --   id), or null when none.
+-- display_effect_label: reader label of the row's own effect (seed alert_effect_labels); a
+--   diversion timetable row is 'Diversion timetable'.
 
 with dates as (
 
@@ -354,9 +356,15 @@ select
     cast(unioned.service_id as varchar) as service_id,
     cast(unioned.display_alert_id as bigint) as display_alert_id,
     cast(display_text.effect_detail as varchar) as display_effect_detail,
-    cast(display_text.header_text as varchar) as alert_header
+    cast(display_text.header_text as varchar) as alert_header,
+    cast(effect_labels.effect_label as varchar) as display_effect_label
 from described as unioned
 left join display_text on unioned.display_alert_id = display_text.alert_id
+left join {{ ref('alert_effect_labels') }} as effect_labels
+    on effect_labels.effect_code = case
+        when unioned.source = 'gtfs_schedule' then 'DIVERSION_TIMETABLE'
+        else unioned.effect_detail
+    end
 inner join {{ ref('dim_routes') }} as routes on unioned.route_id = routes.route_id
 left join {{ ref('dim_stations') }} as from_station on unioned.from_station_id = from_station.station_id
 left join {{ ref('dim_stations') }} as to_station on unioned.to_station_id = to_station.station_id

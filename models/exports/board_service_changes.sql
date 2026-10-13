@@ -30,7 +30,8 @@ select
     changes.service_id,
     changes.display_alert_id,
     changes.display_effect_detail,
-    changes.alert_header
+    changes.alert_header,
+    changes.display_effect_label
 from {{ ref('mart_service_changes') }} as changes
 inner join {{ ref('dim_routes') }} as routes on changes.route_id = routes.route_id
 order by changes.service_date, routes.display_order, changes.source, changes.alert_id

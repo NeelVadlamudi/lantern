@@ -1,0 +1,17 @@
+effect_code,effect_label
+DIVERSION_TIMETABLE,Diversion timetable
+SHUTTLE,Shuttle buses replace trains
+SUSPENSION,Suspension
+STATION_CLOSURE,Station closure
+SERVICE_CHANGE,Service change
+SCHEDULE_CHANGE,Schedule change
+DELAY,Delays
+EXTRA_SERVICE,Extra service
+NOTICE,Notice
+SUMMARY,Summary
+STATION_ISSUE,Station issue
+FACILITY_ISSUE,Facility issue
+BIKE_ISSUE,Bike issue
+PARKING_CLOSURE,Parking closure
+PARKING_ISSUE,Parking issue
+AMBER_ALERT,Amber alert
