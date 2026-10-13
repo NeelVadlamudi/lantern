@@ -8,7 +8,10 @@ with recursive source_events as (
 ),
 
 scheduled as (
-    select distinct service_date, trip_id from {{ ref('int_scheduled_subway_trips') }}
+    select distinct
+        service_date,
+        trip_id
+    from {{ ref('int_scheduled_subway_trips') }}
 ),
 
 ranked as (
@@ -64,17 +67,29 @@ best as (
 ),
 
 chain as (
-    select dropped_event_key, kept_event_key, 1 as depth from best
+    select
+        dropped_event_key,
+        kept_event_key,
+        1 as chain_depth
+    from best
     union all
-    select chain.dropped_event_key, best.kept_event_key, chain.depth + 1
+    select
+        chain.dropped_event_key,
+        best.kept_event_key,
+        chain.chain_depth + 1 as chain_depth
     from chain inner join best on chain.kept_event_key = best.dropped_event_key
 ),
 
 expected as (
-    select kept_event_key, count(*) as dropped_events
+    select
+        kept_event_key,
+        count(*) as dropped_events
     from (
-        select dropped_event_key, arg_max(kept_event_key, depth) as kept_event_key
-        from chain group by dropped_event_key
+        select
+            dropped_event_key,
+            arg_max(kept_event_key, chain_depth) as kept_event_key
+        from chain
+        group by dropped_event_key
     ) as resolved
     group by kept_event_key
 )

@@ -362,9 +362,9 @@ from described as unioned
 left join display_text on unioned.display_alert_id = display_text.alert_id
 left join {{ ref('alert_effect_labels') }} as effect_labels
     on effect_labels.effect_code = case
-        when unioned.source = 'gtfs_schedule' then 'DIVERSION_TIMETABLE'
-        else unioned.effect_detail
-    end
+            when unioned.source = 'gtfs_schedule' then 'DIVERSION_TIMETABLE'
+            else unioned.effect_detail
+        end
 inner join {{ ref('dim_routes') }} as routes on unioned.route_id = routes.route_id
 left join {{ ref('dim_stations') }} as from_station on unioned.from_station_id = from_station.station_id
 left join {{ ref('dim_stations') }} as to_station on unioned.to_station_id = to_station.station_id

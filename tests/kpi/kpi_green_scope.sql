@@ -9,7 +9,7 @@ with trips as (
         count(*) filter (where compared_segments > 0 and is_late_trip) as late_trips
     from {{ ref('fct_trips') }}
     where route_id like 'Green-%' and is_matched_trip
-        and service_date >= (select min(date_day) from {{ ref('dim_dates') }})
+        and service_date >= (select min(window_dates.date_day) from {{ ref('dim_dates') }} as window_dates)
     group by service_date
 ),
 
@@ -20,7 +20,7 @@ gaps as (
         count(*) filter (where is_long_gap) as long_gaps
     from {{ ref('fct_trip_stop_events') }}
     where route_id like 'Green-%' and has_headway_comparison
-        and service_date >= (select min(date_day) from {{ ref('dim_dates') }})
+        and service_date >= (select min(window_dates.date_day) from {{ ref('dim_dates') }} as window_dates)
     group by service_date
 ),
 

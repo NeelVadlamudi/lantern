@@ -13,12 +13,12 @@
 
 with spans as (
     {% for name in exports %}
-    select
-        '{{ name }}' as model_name,
-        min(service_date) as first_date,
-        max(service_date) as last_date
-    from {{ ref(name) }}
-    {% if not loop.last %}union all{% endif %}
+        select
+            '{{ name }}' as model_name,
+            min(service_date) as first_date,
+            max(service_date) as last_date
+        from {{ ref(name) }}
+        {% if not loop.last %}union all{% endif %}
     {% endfor %}
 )
 

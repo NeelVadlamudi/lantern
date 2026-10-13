@@ -22,7 +22,9 @@ with cells as (
         planned.is_planned_change
     from {{ ref('mart_station_rider_time_lost') }} as cells
     inner join {{ ref('mart_planned_change_scope_days') }} as planned
-        on planned.scope_type = 'line' and cells.line_id = planned.scope_id and cells.service_date = planned.service_date
+        on planned.scope_type = 'line'
+            and cells.line_id = planned.scope_id
+            and cells.service_date = planned.service_date
 
 ),
 
@@ -91,7 +93,8 @@ averaged as (
             when pooled.has_rider_data then pooled.rider_seconds_lost_with_gaps / dates_per_type.service_dates
         end as avg_daily_rider_seconds_lost_with_gaps,
         case when pooled.has_rider_data then pooled.rider_seconds_lost end
-        / sum(case when pooled.has_rider_data then pooled.rider_seconds_lost end) over (partition by pooled.day_type, pooled.is_planned_change)
+        / sum(case when pooled.has_rider_data then pooled.rider_seconds_lost end)
+            over (partition by pooled.day_type, pooled.is_planned_change)
             as share_of_total_rider_time_lost,
         case when pooled.has_rider_data then pooled.rider_seconds_lost_with_gaps end
         / sum(case when pooled.has_rider_data then pooled.rider_seconds_lost_with_gaps end)
@@ -147,4 +150,5 @@ select
     averaged.share_of_total_rider_time_lost_with_gaps
 from averaged
 left join {{ ref('dim_stations') }} as stations on averaged.station_id = stations.station_id
-order by averaged.station_id, averaged.line_id, averaged.day_type, averaged.service_period_id, averaged.is_planned_change
+order by
+    averaged.station_id, averaged.line_id, averaged.day_type, averaged.service_period_id, averaged.is_planned_change

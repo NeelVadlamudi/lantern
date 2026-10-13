@@ -1,7 +1,9 @@
+{# Incremental runs replace whole service dates: a republished LAMP day can drop events,
+   and a merge on the row key would keep those stale rows. #}
 {{
     config(
         materialized='incremental',
-        unique_key='trip_stop_event_key',
+        unique_key='service_date',
         incremental_strategy='delete+insert',
         on_schema_change='fail'
     )
@@ -123,13 +125,13 @@ duplicates as (
                 )
             )
     qualify row_number() over (
-        partition by dropped.trip_stop_event_key
-        order by
-            kept.trip_class desc,
-            kept.trip_event_count desc,
-            kept.event_trip_key asc,
-            kept.trip_stop_event_key asc
-    ) = 1
+            partition by dropped.trip_stop_event_key
+            order by
+                kept.trip_class desc,
+                kept.trip_event_count desc,
+                kept.event_trip_key asc,
+                kept.trip_stop_event_key asc
+        ) = 1
 
 ),
 

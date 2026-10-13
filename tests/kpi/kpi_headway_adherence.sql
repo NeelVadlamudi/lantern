@@ -12,7 +12,7 @@ with fact as (
         ) as gapped
     from {{ ref('fct_trip_stop_events') }}
     where has_headway_comparison
-        and service_date >= (select min(date_day) from {{ ref('dim_dates') }})
+        and service_date >= (select min(window_dates.date_day) from {{ ref('dim_dates') }} as window_dates)
     group by route_id, service_date
 ),
 

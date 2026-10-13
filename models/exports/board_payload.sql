@@ -1198,7 +1198,8 @@ latest_day as (
                                 cast(measures.trips_compared as bigint),
                                 measures.typical_days,
                                 case when measures.typical_days = 1 then latest_date.day_type
-                                    else latest_date.day_type || 's' end,
+                                    else latest_date.day_type || 's'
+                                end,
                                 {{ var('typical_min_days') }}
                             )
                     when measures.typical_days > 0
