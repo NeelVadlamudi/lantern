@@ -10,8 +10,9 @@ models:
       period. Kept effect details: SHUTTLE, SUSPENSION, STATION_CLOSURE, SERVICE_CHANGE,
       SCHEDULE_CHANGE, speed restrictions named in the header (slow_zone), and planned DELAY
       alerts. Service dates use the 3 AM boundary. from/to stations are the first and last named
-      stations along the line (direction 0 stop order). Station-only closures are listed but do
-      not mark the line-day (affects_line_day false).
+      stations along the line (direction 0 stop order). Only diversion timetables and planned
+      shuttles or suspensions naming at least two stations of the route mark the line-day
+      (affects_line_day true); other records are listed only.
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -53,7 +54,7 @@ models:
         description: 'DIV timetable, or alert created at least planned_notice_hours before it began.'
         data_tests: [not_null]
       - name: affects_line_day
-        description: 'False for station-only closures, which do not mark the line-day.'
+        description: 'True for DIV timetables and for SHUTTLE or SUSPENSION alerts naming at least two stations of the route; other records do not mark the line-day.'
         data_tests: [not_null]
       - name: from_station_id
         description: 'First named station of the change along the line (null when none named).'

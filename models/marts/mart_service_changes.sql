@@ -14,8 +14,10 @@
 -- change_type: shuttle (effect detail SHUTTLE), closure (SUSPENSION or STATION_CLOSURE),
 --   slow_zone (header names a speed restriction or slow zone), diversion (any other planned
 --   change, including GTFS diversion timetables and announced single tracking).
--- affects_line_day: false only for station closures (trains skip one or more stations but the
---   line runs); every other planned record marks the line-day as a planned change
+-- affects_line_day: true for every GTFS diversion timetable, and for alerts with effect
+--   detail SHUTTLE or SUSPENSION that name at least two stations of this route. Station
+--   closures, single tracking and other announced work without a diversion timetable, service
+--   or schedule change notices and slow zones are listed but do not mark the line-day
 --   (mart_planned_change_line_days).
 -- Service date: an active period counts on every service date (3 AM to 3 AM) it overlaps. An
 --   open-ended period ends when the alert's last version closed it, or runs to the last loaded
@@ -218,7 +220,10 @@ from_alerts as (
         'alerts' as source,  -- noqa: RF04
         kept.change_type,
         kept.is_planned,
-        kept.change_type <> 'closure' or kept.effect_detail <> 'STATION_CLOSURE' as affects_line_day,
+        -- the line's own service changed: shuttle buses or a suspension on this route
+        -- covering at least two of its stations (a stretch of line, not one stop)
+        kept.effect_detail in ('SHUTTLE', 'SUSPENSION')
+        and coalesce(alert_ends.stations_named, 0) >= 2 as affects_line_day,
         alert_ends.from_station_id,
         alert_ends.to_station_id,
         alert_ends.stations_named,

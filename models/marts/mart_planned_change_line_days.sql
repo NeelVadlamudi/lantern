@@ -1,8 +1,9 @@
 -- Grain: one row per line (GTFS route) and service date in the loaded window.
 -- is_planned_change: the line-day has at least one planned service change that affects the
--- whole line-day (mart_service_changes: is_planned and affects_line_day): a planned shuttle,
--- suspension, diversion timetable or announced work such as single tracking. Station-only
--- closures are listed (station_closures) but do not set the flag.
+-- line's own service (mart_service_changes: is_planned and affects_line_day): a diversion
+-- timetable, or a planned shuttle or suspension over at least two stations of the line.
+-- Other planned records (station closures, single tracking without a diversion timetable,
+-- notices, slow zones) are counted in station_closures but do not set the flag.
 -- These line-days are left out of the headline tiles, the line totals and the typical ranges,
 -- and stay in the day views with planned_change_label. The MBTA leaves planned diversion days
 -- out of its Service Delivery Policy reliability results (Fall 2024 SDP report).
