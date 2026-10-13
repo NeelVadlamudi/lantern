@@ -79,17 +79,17 @@ semantic_models:
         agg: count
         expr: trip_key
       - name: trips_compared
-        description: Train runs with at least one segment compared to schedule.
+        description: Matched train runs (trip id in the day's schedule) with at least one segment compared to schedule.
         agg: sum
-        expr: "case when compared_segments > 0 then 1 else 0 end"
+        expr: "case when compared_segments > 0 and is_matched_trip then 1 else 0 end"
       - name: trip_excess_seconds_total
         description: Sum of trip excess seconds over compared trips.
         agg: sum
         expr: "case when compared_segments > 0 then trip_excess_seconds end"
       - name: late_trips
-        description: Trips more than the late threshold over scheduled run time.
+        description: Matched train runs more than the late threshold over scheduled run time.
         agg: sum
-        expr: "case when is_late_trip then 1 else 0 end"
+        expr: "case when is_late_trip and is_matched_trip then 1 else 0 end"
 
 metrics:
   - name: trips
@@ -153,8 +153,8 @@ metrics:
         - name: excess_seconds_per_trip
 
   - name: late_trip_share
-    label: Share of trips 5+ minutes over schedule
-    description: Late trips / compared trips (threshold is var('late_trip_seconds')).
+    label: Train runs 5+ min over scheduled run time
+    description: Late runs / compared runs, matched trips only (threshold is var('late_trip_seconds')). Planned-change days are not filtered here.
     type: ratio
     type_params:
       numerator: late_trips

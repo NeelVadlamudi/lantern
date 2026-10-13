@@ -28,8 +28,8 @@ station_hours as (
 trips as (
     select
         service_date,
-        count(*) filter (where compared_segments > 0) as trips_compared,
-        count(*) filter (where is_late_trip) as late_trips
+        count(*) filter (where compared_segments > 0 and is_matched_trip) as trips_compared,
+        count(*) filter (where is_late_trip and is_matched_trip) as late_trips
     from {{ ref('fct_trips') }}
     group by service_date
 ),

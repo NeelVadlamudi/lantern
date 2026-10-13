@@ -8,7 +8,7 @@ with trips as (
         count(*) filter (where compared_segments > 0) as trips_compared,
         count(*) filter (where compared_segments > 0 and is_late_trip) as late_trips
     from {{ ref('fct_trips') }}
-    where route_id like 'Green-%'
+    where route_id like 'Green-%' and is_matched_trip
     group by service_date
 ),
 

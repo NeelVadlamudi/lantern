@@ -98,5 +98,8 @@ models:
     columns:
       - name: trip_id
         data_tests: [not_null]
+      - name: service_id
+        description: GTFS service_id the trip runs under that date. Planned diversion timetables use ids starting 'DIV'.
+        data_tests: [not_null]
       - name: route_id
         data_tests: [not_null]

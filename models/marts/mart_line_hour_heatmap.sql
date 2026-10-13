@@ -1,7 +1,7 @@
 -- Grain: one row per line scope ('system' or a GTFS route id), service date and service hour.
 -- Service hour = hour of the service day in Boston time (0-23, then 24+ after midnight; see the
 -- service_hour macro), taken from:
---   trips (late_trips / trips_compared)            the trip's first observed stop (fct_trips)
+--   trips (late_trips / trips_compared)            the trip's first observed stop (fct_trips, matched trips)
 --   runs (train delay)                              the arrival that ends the run (int_train_runs,
 --                                                   compared runs, runs over 30 minutes included)
 --   departures (long_gaps / headway_observations)   the departure (fct_trip_stop_events)
@@ -19,7 +19,7 @@ with trips as (
         {{ service_hour('first_event_local_at', 'service_date') }} as service_hour,
         is_late_trip
     from {{ ref('fct_trips') }}
-    where compared_segments > 0
+    where compared_segments > 0 and is_matched_trip
 
 ),
 
@@ -126,7 +126,7 @@ cells as (
 
 ),
 
-rated as (
+rated_base as (
 
     select
         cells.*,
@@ -141,20 +141,43 @@ rated as (
 
 ),
 
+rated_flagged as (
+
+    select
+        rated_base.*,
+        coalesce(planned.is_planned_change, false) as is_planned_change
+    from rated_base
+    left join {{ ref('mart_planned_change_scope_days') }} as planned
+        on
+            planned.scope_type = 'route'
+            and rated_base.scope_id = planned.scope_id
+            and rated_base.service_date = planned.service_date
+
+),
+
+rated as (
+
+    select
+        rated_flagged.*,
+        {{ planned_baseline_key('scope_id, service_hour, day_type') }} as baseline_key
+    from rated_flagged
+
+),
+
 typical as (
 
     select
         rated.*,
-        count(*) over typical_frame as typical_days,
+        count({{ typical_value('1') }}) over typical_frame as typical_days,
     {% for m in ['late_trip_share', 'positive_per_run_seconds', 'long_gap_share', 'positive_seconds'] %}
-        count(rated.{{ m }}) over typical_frame as typical_days_{{ m }},
-        quantile_cont(rated.{{ m }}, 0.25) over typical_frame as typical_p25_{{ m }},
-        median(rated.{{ m }}) over typical_frame as typical_median_{{ m }},
-        quantile_cont(rated.{{ m }}, 0.75) over typical_frame as typical_p75_{{ m }},
-        avg(rated.{{ m }}) over typical_frame as typical_mean_{{ m }}{{ ',' if not loop.last }}  -- noqa: LT02
+        count({{ typical_value('rated.' ~ m) }}) over typical_frame as typical_days_{{ m }},
+        quantile_cont({{ typical_value('rated.' ~ m) }}, 0.25) over typical_frame as typical_p25_{{ m }},
+        median({{ typical_value('rated.' ~ m) }}) over typical_frame as typical_median_{{ m }},
+        quantile_cont({{ typical_value('rated.' ~ m) }}, 0.75) over typical_frame as typical_p75_{{ m }},
+        avg({{ typical_value('rated.' ~ m) }}) over typical_frame as typical_mean_{{ m }}{{ ',' if not loop.last }}  -- noqa: LT02, LT05
     {% endfor %}
     from rated
-    window typical_frame as ({{ typical_window('rated.scope_id, rated.service_hour, rated.day_type') }})
+    window typical_frame as ({{ typical_window_excluding('rated.scope_id, rated.service_hour, rated.day_type') }})
 
 )
 
@@ -164,6 +187,7 @@ select
     cast(service_date as date) as service_date,
     cast(date_key as integer) as date_key,
     cast(day_type as varchar) as day_type,
+    cast(is_planned_change as boolean) as is_planned_change,
     cast(service_hour as integer) as service_hour,
     cast(trips_compared as bigint) as trips_compared,
     cast(late_trips as bigint) as late_trips,

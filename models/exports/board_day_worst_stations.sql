@@ -12,6 +12,7 @@ select
     gaps.scope_id,
     gaps.service_date,
     gaps.day_type,
+    gaps.is_planned_change,
     gaps.day_rank,
     gaps.station_id,
     stations.station_name,

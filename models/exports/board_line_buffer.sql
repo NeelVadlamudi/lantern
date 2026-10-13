@@ -16,6 +16,8 @@ with line_order as (
 
 select
     line_buffer.line_id,
+    line_buffer.first_service_date,
+    line_buffer.last_service_date,
     line_buffer.segments,
     line_buffer.traversals,
     line_buffer.avg_segment_median_run_seconds,

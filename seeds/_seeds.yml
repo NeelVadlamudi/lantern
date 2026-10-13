@@ -91,6 +91,29 @@ seeds:
       - name: definition
         data_tests:
           - not_null
+  - name: board_reference_values
+    description: >
+      Published MBTA reliability reference values shown on the board as labelled references
+      (board_data.json reference_values and the late tile's mbta_reference). They measure excess
+      trip time per rider, not this board's train-run measure.
+    config:
+      column_types:
+        sort_order: integer
+        value: double
+    columns:
+      - name: reference_id
+        data_tests:
+          - unique
+          - not_null
+          - accepted_values:
+              arguments:
+                values: ['mbta_rapid_transit_reliability_target', 'mbta_rapid_transit_reliability_2024']
+      - name: value
+        data_tests:
+          - not_null
+      - name: source_url
+        data_tests:
+          - not_null
   - name: board_sources
     description: Data sources listed on the board (board_data.json meta.sources), with their terms.
     config:

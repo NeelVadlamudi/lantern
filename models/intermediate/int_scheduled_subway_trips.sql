@@ -3,6 +3,8 @@
 -- runs that weekday between the calendar start and end dates and is not removed on the date
 -- (calendar_dates exception_type 2), or is added on the date (exception_type 1). This is the
 -- schedule as published for that date, the same one LAMP compares against.
+-- service_id is kept: the MBTA publishes planned diversions as their own services (ids starting
+-- 'DIV'), which mart_service_changes reads.
 
 with dates as (
 
@@ -94,7 +96,8 @@ select distinct
     cast(active_services.service_date as date) as service_date,
     cast(trips.route_id as varchar) as route_id,
     cast(trips.trip_id as varchar) as trip_id,
-    cast(trips.direction_id as integer) as direction_id
+    cast(trips.direction_id as integer) as direction_id,
+    cast(trips.service_id as varchar) as service_id
 from active_services
 inner join trips
     on

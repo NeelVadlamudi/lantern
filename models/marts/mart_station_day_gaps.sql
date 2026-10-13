@@ -42,7 +42,7 @@ scoped as (
 
 ),
 
-typed as (
+typed_base as (
 
     select
         scoped.*,
@@ -54,6 +54,29 @@ typed as (
 
 ),
 
+typed_flagged as (
+
+    select
+        typed_base.*,
+        coalesce(planned.is_planned_change, false) as is_planned_change
+    from typed_base
+    left join {{ ref('mart_planned_change_scope_days') }} as planned
+        on
+            planned.scope_type = 'route'
+            and typed_base.scope_id = planned.scope_id
+            and typed_base.service_date = planned.service_date
+
+),
+
+typed as (
+
+    select
+        typed_flagged.*,
+        {{ planned_baseline_key('scope_id, station_id, day_type') }} as baseline_key
+    from typed_flagged
+
+),
+
 typical as (
 
     select
@@ -62,13 +85,13 @@ typical as (
             partition by typed.scope_id, typed.service_date
             order by typed.long_gaps desc, typed.long_gap_share desc, typed.station_id asc
         ) as day_rank,
-        median(typed.long_gaps) over typical_frame as typical_median_long_gaps,
-        avg(typed.long_gaps) over typical_frame as typical_mean_long_gaps,
-        median(typed.long_gap_share) over typical_frame as typical_median_long_gap_share,
-        avg(typed.long_gap_share) over typical_frame as typical_mean_long_gap_share,
-        count(*) over typical_frame as typical_days
+        median({{ typical_value('typed.long_gaps') }}) over typical_frame as typical_median_long_gaps,
+        avg({{ typical_value('typed.long_gaps') }}) over typical_frame as typical_mean_long_gaps,
+        median({{ typical_value('typed.long_gap_share') }}) over typical_frame as typical_median_long_gap_share,
+        avg({{ typical_value('typed.long_gap_share') }}) over typical_frame as typical_mean_long_gap_share,
+        count({{ typical_value('1') }}) over typical_frame as typical_days
     from typed
-    window typical_frame as ({{ typical_window('typed.scope_id, typed.station_id, typed.day_type') }})
+    window typical_frame as ({{ typical_window_excluding('typed.scope_id, typed.station_id, typed.day_type') }})
 
 )
 
@@ -78,6 +101,7 @@ select
     cast(service_date as date) as service_date,
     cast(date_key as integer) as date_key,
     cast(day_type as varchar) as day_type,
+    cast(is_planned_change as boolean) as is_planned_change,
     cast(station_id as varchar) as station_id,
     cast(headway_observations as bigint) as headway_observations,
     cast(long_gaps as bigint) as long_gaps,

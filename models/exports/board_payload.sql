@@ -222,7 +222,9 @@ line_daily as (
                 'late_trip_share', {{ board_round('late_trip_share', 4) }},
                 'avg_trip_excess_seconds', {{ board_round('avg_trip_excess_seconds', 1) }},
                 'long_gap_share', {{ board_round('long_gap_share', 4) }},
-                'headway_adherence_share', {{ board_round('headway_adherence_share', 4) }}
+                'headway_adherence_share', {{ board_round('headway_adherence_share', 4) }},
+                'is_planned_change', is_planned_change,
+                'planned_change_label', planned_change_label
             )
             order by service_date
         )) as daily
@@ -240,6 +242,11 @@ lines as (
                 'color', totals.route_color_hex,
                 'trips', totals.trips,
                 'trips_compared', totals.trips_compared,
+                'unmatched_trips_compared', totals.unmatched_trips_compared,
+                'added_trips_compared', totals.added_trips_compared,
+                'service_days', totals.service_days,
+                'planned_change_days', totals.planned_change_days,
+                'late_trip_share_incl_planned', {{ board_round('totals.late_trip_share_incl_planned', 4) }},
                 'excess_share_of_scheduled', {{ board_round('totals.excess_share_of_scheduled', 4) }},
                 'avg_scheduled_trip_minutes', {{ board_round('totals.avg_scheduled_trip_seconds / 60', 1) }},
                 'late_trip_share', {{ board_round('totals.late_trip_share', 4) }},
@@ -969,6 +976,9 @@ line_buffers as (
         to_json(list(
             json_object(
                 'line_id', line_buffer.line_id,
+                'first_service_date', strftime(line_buffer.first_service_date, '%Y-%m-%d'),
+                'last_service_date', strftime(line_buffer.last_service_date, '%Y-%m-%d'),
+                'traversals', line_buffer.traversals,
                 'avg_segment_buffer_seconds', line_buffer.avg_segment_buffer_seconds,
                 'avg_segment_buffer_label', line_buffer.avg_segment_buffer_label,
                 'buffer_index', line_buffer.buffer_index,
@@ -1087,7 +1097,9 @@ latest_measures as (
         max(metrics.denominator) filter (where metrics.measure = 'late_trip_share') as trips_compared,
         max(metrics.typical_median) filter (where metrics.measure = 'late_trip_share') as typical_late_share,
         max(metrics.typical_days) filter (where metrics.measure = 'late_trip_share') as typical_days,
-        max(metrics.value) filter (where metrics.measure = 'completeness_share') as completeness_share
+        max(metrics.value) filter (where metrics.measure = 'completeness_share') as completeness_share,
+        bool_or(metrics.is_planned_change) as is_planned_change,
+        any_value(metrics.planned_change_label) as planned_change_label
     from {{ ref('board_line_day_metrics') }} as metrics
     inner join latest_date on metrics.service_date = latest_date.service_date
     group by metrics.scope_id
@@ -1151,9 +1163,14 @@ latest_day as (
             'day_type', latest_date.day_type,
             'typical_rule', 'Typical = median (and mean) of the same measure on the most recent'
             || ' {{ var("typical_days") }} earlier service dates of the same day type with data for'
-            || ' that line; typical range = p25 to p75 of those days; diff = the day''s value minus the typical value.',
-            'completeness_rule', 'completeness_share = trips compared / trips in the GTFS schedule for the'
-            || ' date; is_low_completeness when below {{ var("completeness_min_share") }}.',
+            || ' that line and no planned service change; typical range = p25 to p75 of those days;'
+            || ' diff = the day''s value minus the typical value.',
+            'completeness_rule', 'completeness_share = scheduled trips with a compared run under their own'
+            || ' trip id / trips in the GTFS schedule for the date (at most 1); is_low_completeness when below'
+            || ' {{ var("completeness_min_share") }}.',
+            'planned_change_rule', 'A day with a planned service change (diversion timetable, or shuttle,'
+            || ' suspension or planned work announced at least {{ var("planned_notice_hours") }} hours ahead)'
+            || ' is shown with its label and is not used for any typical value or headline figure.',
             'worst_segments_rule', 'The 3 segments with the most train delay that day (positive seconds'
             || ' over scheduled, summed over the day''s runs; ties by segment_id).',
             'worst_stations_rule', 'The 3 stations with the most long gaps between trains that day'
@@ -1167,8 +1184,9 @@ latest_day as (
                 'comparison', case
                     when measures.typical_days > 0
                         then format(
-                                '{:.1f}% of trips ran {} or more minutes late ({:,} of {:,});'
-                                || ' a typical {} over the last {} {}s: {:.1f}%.',
+                                '{:.1f}% of train runs took more than {} minutes over their scheduled run'
+                                || ' time ({:,} of {:,}); a typical {} over the last {} {}s without planned'
+                                || ' changes: {:.1f}%.',
                                 100 * measures.late_share,
                                 {{ var('late_trip_seconds') }} // 60,
                                 cast(measures.late_trips as bigint),
@@ -1179,8 +1197,9 @@ latest_day as (
                                 100 * measures.typical_late_share
                             )
                     else format(
-                            '{:.1f}% of trips ran {} or more minutes late ({:,} of {:,}); no earlier {}'
-                            || ' in the window to compare with.',
+                            '{:.1f}% of train runs took more than {} minutes over their scheduled run'
+                            || ' time ({:,} of {:,}); no earlier {} without planned changes in the window'
+                            || ' to compare with.',
                             100 * measures.late_share,
                             {{ var('late_trip_seconds') }} // 60,
                             cast(measures.late_trips as bigint),
@@ -1192,6 +1211,8 @@ latest_day as (
                 'is_low_completeness', coalesce(
                     measures.completeness_share < {{ var('completeness_min_share') }}, false
                 ),
+                'is_planned_change', coalesce(measures.is_planned_change, false),
+                'planned_change_label', measures.planned_change_label,
                 'measures', measures.measures,
                 'worst_segments', coalesce(segments.segments, json('[]')),
                 'worst_stations', coalesce(stations.stations, json('[]'))
@@ -1316,6 +1337,8 @@ charts as (
         ),
         'headway_adherence_file', 'headway_adherence.parquet',
         'completeness_file', 'line_day_completeness.parquet',
+        'service_changes_file', 'service_changes.parquet',
+        'rider_headway_adherence_file', 'rider_headway_adherence.parquet',
         'histogram_file', 'delay_histogram.parquet',
         'share_by_line_file', 'train_delay_by_line.parquet',
         'date_filter_file', 'line_day_metrics.parquet',
@@ -1338,6 +1361,56 @@ charts as (
 glossary as (
     select to_json(list(json_object('term', term, 'meaning', meaning) order by sort_order)) as glossary
     from {{ ref('board_glossary') }}
+),
+
+reference_values as (
+    select
+        to_json(list(json_object(
+            'id', reference_id,
+            'label', label,
+            'value', value,
+            'unit', unit,
+            'measure', measure,
+            'scope', scope,
+            'period', period,
+            'source_name', source_name,
+            'source_url', source_url,
+            'note', 'An MBTA figure for its own measure (excess trip time per rider), not this board''s.'
+        ) order by sort_order)) as reference_values
+    from {{ ref('board_reference_values') }}
+),
+
+service_changes as (
+    select json_object(
+        'rule', 'Planned change = GTFS diversion timetable (service_id starting DIV) or an MBTA alert'
+        || ' announced at least {{ var("planned_notice_hours") }} hours ahead (shuttle, suspension, planned'
+        || ' work); station-only closures are listed but do not mark the line-day.',
+        'planned_change_line_days', (
+            select count(*) from {{ ref('mart_planned_change_line_days') }}
+            where is_planned_change
+        ),
+        'line_days', (select count(*) from {{ ref('mart_planned_change_line_days') }}),
+        'by_route', (
+            select
+                to_json(list(json_object(
+                    'route_id', planned.route_id,
+                    'planned_change_days', planned.planned_change_days,
+                    'diversion_timetable_days', planned.diversion_timetable_days,
+                    'planned_alert_days', planned.planned_alert_days
+                ) order by routes.display_order))
+            from (
+                select
+                    route_id,
+                    count(*) filter (where is_planned_change) as planned_change_days,
+                    count(*) filter (where has_diversion_timetable) as diversion_timetable_days,
+                    count(*) filter (where is_planned_change and has_planned_alert) as planned_alert_days
+                from {{ ref('mart_planned_change_line_days') }}
+                group by route_id
+            ) as planned
+            inner join {{ ref('dim_routes') }} as routes on planned.route_id = routes.route_id
+        ),
+        'file', 'service_changes.parquet'
+    ) as service_changes
 )
 
 select
@@ -1347,7 +1420,7 @@ select
     coalesce(worst_stations.worst_stations, json('[]')) as worst_stations,
     coalesce(worst_periods.worst_periods, json('[]')) as worst_periods,
     'Weekday line x service period cells with at least 200 compared trips, ranked by share of'
-    || ' trips 5+ minutes late.' as worst_periods_rule,
+    || ' train runs 5+ min over scheduled run time.' as worst_periods_rule,
     map_block.map,
     coalesce(files.files, json('[]')) as files,
     data_coverage.coverage,
@@ -1355,6 +1428,8 @@ select
     coalesce(glossary.glossary, json('[]')) as glossary,
     latest_day.latest_day,
     coalesce(methods.methods, json('[]')) as methods,
+    coalesce(reference_values.reference_values, json('[]')) as reference_values,
+    service_changes.service_changes,
     commuter_rail.commuter_rail,
     survey.survey,
     charts.charts
@@ -1370,6 +1445,8 @@ cross join decision
 cross join glossary
 cross join latest_day
 cross join methods
+cross join reference_values
+cross join service_changes
 cross join commuter_rail
 cross join survey
 cross join charts

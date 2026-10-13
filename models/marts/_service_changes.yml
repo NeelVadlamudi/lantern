@@ -1,0 +1,208 @@
+version: 2
+
+models:
+  - name: mart_service_changes
+    description: >-
+      Grain: one row per service date, route and change record. Two sources: GTFS diversion
+      timetables (service_id starting 'DIV', always planned) and MBTA alerts (stg_lamp__rt_alerts,
+      last version with active periods; closed_at from the last version). An alert is planned
+      when it was created at least var planned_notice_hours (24) hours before its first active
+      period. Kept effect details: SHUTTLE, SUSPENSION, STATION_CLOSURE, SERVICE_CHANGE,
+      SCHEDULE_CHANGE, speed restrictions named in the header (slow_zone), and planned DELAY
+      alerts. Service dates use the 3 AM boundary. from/to stations are the first and last named
+      stations along the line (direction 0 stop order). Station-only closures are listed but do
+      not mark the line-day (affects_line_day false).
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [service_change_key]
+    columns:
+      - name: service_change_key
+        description: 'Surrogate key of the row.'
+        data_tests: [unique, not_null]
+      - name: service_date
+        description: 'Service date the change applies to.'
+        data_tests: [not_null]
+      - name: date_key
+        description: 'Service date as YYYYMMDD.'
+      - name: route_id
+        description: 'GTFS route id.'
+        data_tests:
+          - not_null
+          - relationships:
+              arguments:
+                to: ref('dim_routes')
+                field: route_id
+      - name: line_id
+        description: 'Line (Red, Orange, Blue, Green, Mattapan).'
+      - name: source
+        description: "'gtfs_schedule' (DIV timetable) or 'alerts'."
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [gtfs_schedule, alerts]
+      - name: change_type
+        description: 'shuttle, closure, diversion or slow_zone.'
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments:
+                values: [shuttle, closure, diversion, slow_zone]
+      - name: is_planned
+        description: 'DIV timetable, or alert created at least planned_notice_hours before it began.'
+        data_tests: [not_null]
+      - name: affects_line_day
+        description: 'False for station-only closures, which do not mark the line-day.'
+        data_tests: [not_null]
+      - name: from_station_id
+        description: 'First named station of the change along the line (null when none named).'
+      - name: from_station_name
+        description: 'Name of from_station_id.'
+      - name: to_station_id
+        description: 'Last named station of the change along the line.'
+      - name: to_station_name
+        description: 'Name of to_station_id.'
+      - name: stations_named
+        description: 'Distinct stations the alert names on that route.'
+      - name: alert_id
+        description: 'MBTA alert id (null for DIV timetable rows).'
+      - name: effect
+        description: 'GTFS-RT effect of the alert.'
+      - name: effect_detail
+        description: 'MBTA effect detail of the alert.'
+      - name: cause
+        description: 'GTFS-RT cause of the alert.'
+      - name: header_text
+        description: 'Alert header text (null for DIV timetable rows).'
+      - name: alert_created_at
+        description: 'When the alert was first created (Boston local).'
+      - name: alert_first_active_at
+        description: 'Start of its first active period (Boston local).'
+      - name: service_id
+        description: 'GTFS service_id of the DIV timetable (null for alert rows).'
+
+  - name: mart_planned_change_line_days
+    description: >-
+      Grain: one row per subway route and service date in the window (dim_routes x dim_dates).
+      is_planned_change when mart_service_changes has a planned record that affects the
+      line-day. Those line-days stay in the day views, labelled, and are left out of the headline
+      tiles, the line totals and every typical value.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [route_id, service_date]
+    columns:
+      - name: line_day_key
+        description: 'Surrogate key of route and date.'
+        data_tests: [unique, not_null]
+      - name: route_id
+        description: 'GTFS route id.'
+        data_tests: [not_null]
+      - name: service_date
+        description: 'Service date.'
+        data_tests: [not_null]
+      - name: day_type
+        description: 'weekday, saturday, sunday or holiday.'
+      - name: is_planned_change
+        description: 'A planned service change on that line that day.'
+        data_tests: [not_null]
+      - name: planned_change_types
+        description: 'Change types of the planned records, comma separated.'
+      - name: planned_alert_ids
+        description: 'Planned alert ids, comma separated.'
+      - name: has_diversion_timetable
+        description: 'A DIV service_id ran on that route that day.'
+        data_tests: [not_null]
+      - name: has_planned_alert
+        description: 'A planned alert affecting the line covered the day.'
+        data_tests: [not_null]
+      - name: planned_change_records
+        description: 'Planned records that mark the line-day.'
+      - name: station_closures
+        description: 'Station-only closure records that day (do not set the flag).'
+      - name: planned_change_label
+        description: "'Planned service change: <types>', with ' (diversion timetable)' when one ran; null without a change."
+
+  - name: mart_planned_change_scope_days
+    description: >-
+      Grain: one row per scope type, scope and service date. scope_type 'route' covers route ids,
+      'Green' (any Green branch) and 'system' (any route); scope_type 'line' covers line ids and
+      'system'. Used to keep planned-change days out of typical values in the heatmap, station
+      and segment day marts.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [scope_type, scope_id, service_date]
+    columns:
+      - name: scope_day_key
+        description: 'Surrogate key of the row.'
+        data_tests: [unique, not_null]
+      - name: scope_type
+        description: "'route' or 'line'."
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [route, line]
+      - name: scope_id
+        description: 'Route id, line id, Green or system.'
+      - name: service_date
+        description: 'Service date.'
+      - name: is_planned_change
+        description: 'At least one route in the scope had a planned change.'
+        data_tests: [not_null]
+      - name: planned_change_lines
+        description: 'Routes in the scope with a planned change.'
+      - name: planned_change_label
+        description: 'Label of the change; null without one.'
+
+  - name: mart_rider_headway_adherence
+    description: >-
+      Grain: one row per scope (route id, Green, system), day type and service period. The
+      estimated share of riders who waited no longer than the allowed wait T: T = greatest(H,
+      180 s) at Green Line trunk stations (on two or more Green branches) and the scheduled
+      headway H elsewhere. Riders arriving at random in a gap of h seconds: share within T =
+      least(h, T) / h, weighted by the arrival rate from fare-gate entries (rider basis window),
+      split 50/50 between directions; ungated stops get their line's average gated rate;
+      holidays use Sunday rates. Line-days with a planned change are left out. See the model SQL
+      header and methods row rider_headway_adherence.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [scope_id, day_type, service_period_id]
+    columns:
+      - name: scope_period_key
+        description: 'Surrogate key of the row.'
+        data_tests: [unique, not_null]
+      - name: scope_id
+        description: 'Route id, Green or system.'
+        data_tests: [not_null]
+      - name: day_type
+        description: 'weekday, saturday, sunday or holiday.'
+      - name: service_period_id
+        description: 'Service Delivery Policy period (int_service_periods).'
+      - name: service_days
+        description: 'Service dates with departures in the cell.'
+      - name: departures
+        description: 'Departures with a positive actual and scheduled headway.'
+      - name: departures_at_gated_stations
+        description: 'Of them, at stations with fare gates.'
+      - name: departures_at_green_trunk
+        description: 'Of them, at Green Line trunk stations (T at least 180 s).'
+      - name: departures_weighted
+        description: 'Departures with an arrival rate (gated or line average).'
+      - name: est_riders
+        description: 'Estimated riders waiting: sum of rate x h.'
+      - name: est_riders_within_allowance
+        description: 'Of them, waiting no longer than T: sum of rate x least(h, T).'
+      - name: rider_weighted_share
+        description: 'est_riders_within_allowance / est_riders.'
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
+      - name: unweighted_share
+        description: 'sum(least(h, T)) / sum(h): the same with one rate everywhere.'
+      - name: departure_share
+        description: 'Share of departures with h <= T (no rider weighting).'

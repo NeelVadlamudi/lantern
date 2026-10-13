@@ -1,6 +1,11 @@
 -- Grain: one row per line (GTFS route) and service date.
--- Trip measures are per train run (fct_trips), over trips with at least one compared segment,
--- the same grain as the systemwide figures. Longer lines collect more excess per trip, so
+-- Trip measures are per train run (fct_trips), over matched trips (trip id in the day's GTFS
+-- schedule) with at least one compared segment, the same grain as the systemwide figures.
+-- Runs whose trip id is not scheduled that day (mostly LAMP 'ADDED-' trips) are counted in
+-- unmatched_trips_compared / added_trips_compared and left out of the trip measures; stop-level
+-- measures (headways, gaps) use every stop event, duplicates removed.
+-- is_planned_change / planned_change_label: mart_planned_change_line_days.
+-- Longer lines collect more excess per trip, so
 -- excess_share_of_scheduled (excess / scheduled run time) is included to compare lines fairly.
 -- The *_sum and count columns are additive across dates; shares and averages are not.
 -- day_type (weekday / saturday / sunday / holiday) comes from dim_dates.
@@ -41,12 +46,26 @@ event_stats as (
 
 ),
 
-trip_stats as (
+all_trip_stats as (
 
     select
         route_id,
         service_date,
         count(*) as trips,
+        count(*) filter (where compared_segments > 0) as all_trips_compared,
+        count(*) filter (where compared_segments > 0 and not is_matched_trip) as unmatched_trips_compared,
+        count(*) filter (where compared_segments > 0 and not is_matched_trip and is_added_trip)
+            as added_trips_compared
+    from trips
+    group by route_id, service_date
+
+),
+
+trip_stats as (
+
+    select
+        route_id,
+        service_date,
         count(*) filter (where compared_segments > 0) as trips_compared,
         avg(trip_excess_seconds) filter (where compared_segments > 0) as avg_trip_excess_seconds,
         count(*) filter (where compared_segments > 0 and is_late_trip) as late_trips,
@@ -66,6 +85,7 @@ trip_stats as (
         sum(trip_scheduled_seconds_excl_long_runs) filter (where compared_segments_excl_long_runs > 0)
             as trip_scheduled_seconds_sum_excl_long_runs
     from trips
+    where is_matched_trip
     group by route_id, service_date
 
 )
@@ -76,13 +96,18 @@ select
     cast(event_stats.service_date as date) as service_date,
     cast(strftime(event_stats.service_date, '%Y%m%d') as integer) as date_key,
     cast(dates.day_type as varchar) as day_type,
-    cast(trip_stats.trips as bigint) as trips,
-    cast(trip_stats.trips_compared as bigint) as trips_compared,
+    cast(all_trip_stats.trips as bigint) as trips,
+    cast(coalesce(trip_stats.trips_compared, 0) as bigint) as trips_compared,
+    cast(coalesce(all_trip_stats.unmatched_trips_compared, 0) as bigint) as unmatched_trips_compared,
+    cast(coalesce(all_trip_stats.added_trips_compared, 0) as bigint) as added_trips_compared,
+    cast(coalesce(all_trip_stats.all_trips_compared, 0) as bigint) as all_trips_compared,
+    cast(planned.is_planned_change as boolean) as is_planned_change,
+    cast(planned.planned_change_label as varchar) as planned_change_label,
     cast(event_stats.trip_stop_events as bigint) as trip_stop_events,
     cast(event_stats.travel_comparisons as bigint) as travel_comparisons,
     cast(trip_stats.avg_trip_excess_seconds as double) as avg_trip_excess_seconds,
     cast(trip_stats.late_trip_share as double) as late_trip_share,
-    cast(trip_stats.late_trips as bigint) as late_trips,
+    cast(coalesce(trip_stats.late_trips, 0) as bigint) as late_trips,
     cast(trip_stats.trip_excess_seconds_sum as bigint) as trip_excess_seconds_sum,
     cast(trip_stats.trip_scheduled_seconds_sum as bigint) as trip_scheduled_seconds_sum,
     cast(
@@ -110,8 +135,14 @@ select
     cast(trip_stats.trip_scheduled_seconds_sum_excl_long_runs as bigint)
         as trip_scheduled_seconds_sum_excl_long_runs
 from event_stats
+left join all_trip_stats
+    on event_stats.route_id = all_trip_stats.route_id
+        and event_stats.service_date = all_trip_stats.service_date
 left join trip_stats
     on event_stats.route_id = trip_stats.route_id
         and event_stats.service_date = trip_stats.service_date
 inner join {{ ref('dim_dates') }} as dates
     on event_stats.service_date = dates.date_day
+inner join {{ ref('mart_planned_change_line_days') }} as planned
+    on event_stats.route_id = planned.route_id
+        and event_stats.service_date = planned.service_date

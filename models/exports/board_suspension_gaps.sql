@@ -10,6 +10,7 @@
 select
     gaps.service_date,
     gaps.day_type,
+    coalesce(planned.is_planned_change, false) as is_planned_change,
     gaps.service_period_id,
     gaps.line_id,
     gaps.route_id,
@@ -30,4 +31,9 @@ select
     gaps.is_passenger_wait
 from {{ ref('fct_suspension_gaps') }} as gaps
 left join {{ ref('dim_stations') }} as stations on gaps.station_id = stations.station_id
+left join {{ ref('mart_planned_change_scope_days') }} as planned
+    on
+        planned.scope_type = 'route'
+        and gaps.route_id = planned.scope_id
+        and gaps.service_date = planned.service_date
 order by gaps.service_date, gaps.station_id, gaps.stop_id, gaps.departed_at, gaps.trip_stop_event_key

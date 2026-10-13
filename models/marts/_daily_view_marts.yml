@@ -28,12 +28,23 @@ models:
       - name: day_type
         data_type: varchar
         description: 'weekday, saturday, sunday or holiday.'
+      - name: is_planned_change
+        data_type: boolean
+        description: 'The scope had a planned service change that day (Green and system: any of their routes). The row is kept and labelled but is never used in a typical value.'
+        data_tests: [not_null]
+      - name: planned_change_lines
+        data_type: bigint
+        description: 'Routes in the scope with a planned change that day.'
+        data_tests: [not_null]
+      - name: planned_change_label
+        data_type: varchar
+        description: 'Plain label of the change types; null without one.'
       - name: measure
         data_type: varchar
         description: 'Measure name.'
       - name: unit
         data_type: varchar
-        description: 'count, share (0 to 1), seconds, or ratio (completeness_share: trips compared over trips scheduled, can exceed 1 when added trips run).'
+        description: 'count, share (0 to 1), seconds, or ratio (completeness_share: scheduled trips compared over trips scheduled, at most 1).'
       - name: value
         data_type: double
         description: 'The days value of the measure.'
@@ -45,7 +56,7 @@ models:
         description: 'Denominator of a share or per-run value (null for plain counts).'
       - name: typical_days
         data_type: bigint
-        description: 'Earlier service dates of the same day type used for the typical value (up to var typical_days).'
+        description: 'Earlier service dates of the same day type, without a planned change, used for the typical value (up to var typical_days; 0 when none).'
       - name: typical_first_date
         data_type: date
         description: 'First date used for the typical value.'
@@ -96,6 +107,10 @@ models:
       - name: day_type
         data_type: varchar
         description: 'weekday, saturday, sunday or holiday.'
+      - name: is_planned_change
+        data_type: boolean
+        description: 'The line (Green and system: any of their routes) had a planned service change that day. Shown and labelled in the day view; the day is never used in a typical value.'
+        data_tests: [not_null]
       - name: segment_id
         data_type: varchar
         description: 'Track segment id (dim_segments).'
@@ -170,6 +185,10 @@ models:
       - name: day_type
         data_type: varchar
         description: 'weekday, saturday, sunday or holiday.'
+      - name: is_planned_change
+        data_type: boolean
+        description: 'The line (Green and system: any of their routes) had a planned service change that day. Shown and labelled in the day view; the day is never used in a typical value.'
+        data_tests: [not_null]
       - name: station_id
         data_type: varchar
         description: 'GTFS parent station id (place-*).'
@@ -238,6 +257,10 @@ models:
       - name: day_type
         data_type: varchar
         description: 'weekday, saturday, sunday or holiday.'
+      - name: is_planned_change
+        data_type: boolean
+        description: 'The line (Green and system: any of their routes) had a planned service change that day. Shown and labelled in the day view; the day is never used in a typical value.'
+        data_tests: [not_null]
       - name: service_hour
         data_type: integer
         description: 'Hour after midnight at the start of the service date, Boston time (24 to 27 = after midnight).'
@@ -375,6 +398,10 @@ models:
       - name: day_type
         data_type: varchar
         description: 'weekday, saturday, sunday or holiday.'
+      - name: is_planned_change
+        data_type: boolean
+        description: 'The line (Green and system: any of their routes) had a planned service change that day. Shown and labelled in the day view; the day is never used in a typical value.'
+        data_tests: [not_null]
       - name: service_hour
         data_type: integer
         description: 'Hour after midnight at the start of the service date, Boston time (24 to 27 = after midnight).'
@@ -611,9 +638,11 @@ models:
   - name: mart_line_day_completeness
     description: >
       Grain: one row per scope ('system' or a subway route id) and service date in the window.
-      Trips compared against trips in the GTFS schedule published for the date
-      (int_scheduled_subway_trips). is_low_completeness when completeness_share is below var
-      completeness_min_share (0.8). A low day can be missing data or a real service change.
+      Scheduled trips with a compared run under their own trip id against trips in the GTFS
+      schedule published for the date (int_scheduled_subway_trips), so completeness_share is at
+      most 1. Unmatched and added runs and dropped duplicate stop events are counted separately.
+      is_low_completeness when completeness_share is below var completeness_min_share (0.8).
+      is_planned_change marks planned service changes (mart_planned_change_line_days).
     data_tests:
       - dbt_utils.unique_combination_of_columns:
           arguments:
@@ -637,13 +666,34 @@ models:
         description: 'Trips in the GTFS schedule for that date (0 when none).'
       - name: trips_observed
         data_type: bigint
-        description: 'Train runs LAMP recorded (fct_trips; one per trip and vehicle).'
+        description: 'Train runs LAMP recorded, duplicate stop events removed (fct_trips; one per trip and vehicle).'
       - name: trips_compared
         data_type: bigint
-        description: 'Runs with at least one stop-to-stop comparison (the late-trip denominator).'
+        description: 'Same as matched_trips_compared (the completeness numerator).'
+      - name: matched_trips_compared
+        data_type: bigint
+        description: 'Scheduled trips with at least one compared run under their own trip id; never above scheduled_trips.'
+        data_tests: [not_null]
+      - name: matched_runs_compared
+        data_type: bigint
+        description: 'Compared runs whose trip id is scheduled that date: the late-share denominator.'
+      - name: unmatched_runs_compared
+        data_type: bigint
+        description: 'Compared runs whose trip id is not in the day schedule (not in the late share).'
+      - name: added_runs_compared
+        data_type: bigint
+        description: 'Of unmatched_runs_compared, runs with ADDED- trip ids.'
+      - name: duplicate_stop_events_dropped
+        data_type: bigint
+        description: 'Stop events dropped as the same train recorded twice (fct_trip_stop_events).'
       - name: completeness_share
         data_type: double
-        description: 'trips_compared / scheduled_trips; null with no scheduled trips; can exceed 1 with added trips.'
+        description: 'matched_trips_compared / scheduled_trips; null with no scheduled trips; at most 1.'
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments:
+                min_value: 0
+                max_value: 1
       - name: completeness_min_share
         data_type: double
         description: 'The threshold used (var completeness_min_share).'
@@ -651,3 +701,13 @@ models:
         data_type: boolean
         description: 'True when trips_compared is below completeness_min_share x scheduled_trips (a day with no trips compared and none scheduled is not low).'
         data_tests: [not_null]
+      - name: is_planned_change
+        data_type: boolean
+        description: 'A line with a planned service change that day; for system, any line.'
+        data_tests: [not_null]
+      - name: planned_change_lines
+        data_type: bigint
+        description: 'Routes with a planned change that day (0 or 1 for a route).'
+      - name: planned_change_label
+        data_type: varchar
+        description: 'Plain label of the change; null without one.'

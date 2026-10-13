@@ -1,6 +1,6 @@
 -- Grain: one row per measure kind, line scope ('system' or a GTFS route id), service date and
 -- 1-minute bin that has at least one observation (empty bins are not stored; their count is 0).
--- kind 'trip': trip excess of each compared trip (fct_trips.trip_excess_seconds, runs over 30
+-- kind 'trip': trip excess of each compared matched trip (fct_trips.trip_excess_seconds, runs over 30
 --              minutes included).
 -- kind 'run':  net excess of each compared stop-to-stop run (int_train_runs).
 -- Bins are [k, k+1) minutes from var('histogram_min_minutes') (-15) to var('histogram_max_minutes')
@@ -17,7 +17,7 @@ with observations as (
         service_date,
         cast(trip_excess_seconds as double) as excess_seconds
     from {{ ref('fct_trips') }}
-    where compared_segments > 0
+    where compared_segments > 0 and is_matched_trip
 
     union all
 

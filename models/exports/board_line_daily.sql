@@ -5,6 +5,8 @@
 }}
 -- Board file: daily reliability per line (mart_line_daily_reliability + route display fields).
 -- Grain: one row per route and service date. day_type: weekday, saturday, sunday or holiday.
+-- trips_compared and the late share are matched trips; is_planned_change labels line-days with a
+-- planned service change (kept here, left out of the headline tiles).
 
 select
     d.route_id,
@@ -13,8 +15,12 @@ select
     r.route_color_hex,
     d.service_date,
     d.day_type,
+    d.is_planned_change,
+    d.planned_change_label,
     d.trips,
     d.trips_compared,
+    d.unmatched_trips_compared,
+    d.added_trips_compared,
     d.trip_stop_events,
     round(d.avg_trip_excess_seconds, 1) as avg_trip_excess_seconds,
     round(d.late_trip_share, 4) as late_trip_share,

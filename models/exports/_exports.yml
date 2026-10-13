@@ -269,6 +269,15 @@ models:
         data_tests:
           - unique
           - not_null
+      - name: first_service_date
+        description: 'First service date with a compared run on the line: start of the window the buffer is computed over.'
+        data_tests: [not_null]
+      - name: last_service_date
+        description: 'Last service date with a compared run on the line: end of that window.'
+        data_tests: [not_null]
+      - name: traversals
+        description: 'Compared train runs over the line segments (the run count behind the weights).'
+        data_tests: [not_null]
 
   - name: board_duration_label_cases
     description: >-
@@ -287,7 +296,11 @@ models:
   - name: board_headway_adherence
     description: "Parquet file out/headway_adherence.parquet. Grain: one row per scope (system or route), service date and service hour: departures compared, bunched (under 2 min) and gapped (over scheduled + 5 min) counts and shares (SFMTA rules)."
   - name: board_line_day_completeness
-    description: "Parquet file out/line_day_completeness.parquet. Grain: one row per scope and service date: trips scheduled (GTFS), observed and compared, completeness share and the low-completeness flag."
+    description: "Parquet file out/line_day_completeness.parquet. Grain: one row per scope and service date: trips scheduled (GTFS), observed and compared (matched to the schedule, unmatched, added), duplicate stop events dropped, completeness share (at most 1), the low-completeness flag and the planned-change flag and label."
+  - name: board_service_changes
+    description: "Parquet file out/service_changes.parquet. The mart_service_changes rows: date, line, from/to station, change type, planned or not, alert id and header text, or the DIV service_id."
+  - name: board_rider_headway_adherence
+    description: "Parquet file out/rider_headway_adherence.parquet. The mart_rider_headway_adherence rows with the service period name and sort order: rider-weighted headway adherence by line, day type and period."
   - name: board_station_hour_heatmap_red
     description: "Parquet file out/station_hour_heatmap_red.parquet. The board_station_hour_heatmap rows for one line, so the page loads only the picked line."
   - name: board_station_hour_heatmap_orange

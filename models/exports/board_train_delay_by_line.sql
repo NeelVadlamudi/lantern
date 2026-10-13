@@ -12,6 +12,8 @@ select
     delay.period_kind,
     delay.service_date,
     delay.route_id,
+    coalesce(planned.is_planned_change, false) as is_planned_change,
+    planned.planned_change_label,
     routes.display_name,
     routes.route_color_hex,
     delay.service_dates,
@@ -25,4 +27,9 @@ select
     delay.share_of_positive_excess
 from {{ ref('mart_train_delay_by_line') }} as delay
 inner join {{ ref('dim_routes') }} as routes on delay.route_id = routes.route_id
+left join {{ ref('mart_planned_change_scope_days') }} as planned
+    on
+        planned.scope_type = 'route'
+        and delay.route_id = planned.scope_id
+        and delay.service_date = planned.service_date
 order by delay.period_kind, delay.service_date, routes.display_order

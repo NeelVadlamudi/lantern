@@ -1,12 +1,15 @@
+-- Matched trips only (trip id in the day's schedule), planned-change line-days excluded.
 -- Excess tile = average of (actual - scheduled) seconds per compared trip, and the same summed
 -- excess as a share of scheduled time. Recomputed from fct_trips. Tolerance: 0.06 s (value is
 -- rounded to 0.1 s) and 1e-4 for the share.
 with fact as (
     select
-        avg(trip_excess_seconds) as avg_trip_excess_seconds,
-        sum(trip_excess_seconds) / sum(trip_scheduled_seconds) as share_of_scheduled
-    from {{ ref('fct_trips') }}
-    where compared_segments > 0
+        avg(trips.trip_excess_seconds) as avg_trip_excess_seconds,
+        sum(trips.trip_excess_seconds) / sum(trips.trip_scheduled_seconds) as share_of_scheduled
+    from {{ ref('fct_trips') }} as trips
+    inner join {{ ref('mart_planned_change_line_days') }} as planned
+        on trips.route_id = planned.route_id and trips.service_date = planned.service_date
+    where trips.compared_segments > 0 and trips.is_matched_trip and not planned.is_planned_change
 )
 
 select

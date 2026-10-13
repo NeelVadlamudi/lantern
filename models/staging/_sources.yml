@@ -37,6 +37,23 @@ sources:
             data_tests:
               - not_null
 
+      - name: lamp_rt_alerts
+        description: >
+          LAMP archive of the MBTA GTFS-realtime service alerts feed (LAMP_RT_ALERTS), one row per
+          alert version, informed entity and active period, from 2019 on. Timestamps are local
+          (America/New_York) datetimes. Read in place; staging keeps subway and light rail alerts.
+          https://github.com/mbta/lamp/blob/main/Data_Dictionary.md (LAMP_RT_ALERTS)
+        config:
+          external_location: >-
+            read_parquet('{{ var('lamp_alerts_url', 'data/sample/lamp/LAMP_RT_ALERTS.parquet'
+            if var('use_sample', false)
+            else 'https://performancedata.mbta.com/lamp/tableau/alerts/LAMP_RT_ALERTS.parquet') }}')
+        columns:
+          - name: id
+            description: Alert id.
+            data_tests:
+              - not_null
+
   - name: gtfs
     description: >
       LAMP compressed GTFS archive. Every GTFS schedule the MBTA has published, one Parquet file

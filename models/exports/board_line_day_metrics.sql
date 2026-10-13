@@ -7,7 +7,8 @@
 -- with the typical value for the same day type over the earlier var('typical_days') days of that
 -- day type (mart_line_day_metrics). Long format: one row per scope, service date and measure.
 -- scope_id is 'system' (all subway routes), a route id, or 'Green' (the four Green Line branches
--- combined). Shares are numerator / denominator;
+-- combined). Shares are numerator / denominator. Days with a planned service change keep their
+-- figures and carry is_planned_change / planned_change_label; typical values never include them.
 -- *_label is format_duration of the seconds measures (null for counts and shares).
 
 select
@@ -19,6 +20,9 @@ select
     coalesce(routes.route_color_hex, green.route_color_hex) as route_color_hex,
     metrics.service_date,
     metrics.day_type,
+    metrics.is_planned_change,
+    metrics.planned_change_lines,
+    metrics.planned_change_label,
     metrics.measure,
     metrics.unit,
     metrics.value,

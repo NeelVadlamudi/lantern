@@ -63,7 +63,7 @@ cells as (
 
 ),
 
-rated as (
+rated_base as (
 
     select
         cells.*,
@@ -77,21 +77,44 @@ rated as (
 
 ),
 
+rated_flagged as (
+
+    select
+        rated_base.*,
+        coalesce(planned.is_planned_change, false) as is_planned_change
+    from rated_base
+    left join {{ ref('mart_planned_change_scope_days') }} as planned
+        on
+            planned.scope_type = 'line'
+            and rated_base.line_id = planned.scope_id
+            and rated_base.service_date = planned.service_date
+
+),
+
+rated as (
+
+    select
+        rated_flagged.*,
+        {{ planned_baseline_key('station_id, line_id, service_hour, day_type') }} as baseline_key
+    from rated_flagged
+
+),
+
 typical as (
 
     select
         rated.*,
-        count(*) over typical_frame as typical_days,
+        count({{ typical_value('1') }}) over typical_frame as typical_days,
     {% for m in ['positive_per_run_seconds', 'long_gap_share', 'positive_seconds'] %}
-        count(rated.{{ m }}) over typical_frame as typical_days_{{ m }},
-        quantile_cont(rated.{{ m }}, 0.25) over typical_frame as typical_p25_{{ m }},
-        median(rated.{{ m }}) over typical_frame as typical_median_{{ m }},
-        quantile_cont(rated.{{ m }}, 0.75) over typical_frame as typical_p75_{{ m }},
-        avg(rated.{{ m }}) over typical_frame as typical_mean_{{ m }}{{ ',' if not loop.last }}  -- noqa: LT02
+        count({{ typical_value('rated.' ~ m) }}) over typical_frame as typical_days_{{ m }},
+        quantile_cont({{ typical_value('rated.' ~ m) }}, 0.25) over typical_frame as typical_p25_{{ m }},
+        median({{ typical_value('rated.' ~ m) }}) over typical_frame as typical_median_{{ m }},
+        quantile_cont({{ typical_value('rated.' ~ m) }}, 0.75) over typical_frame as typical_p75_{{ m }},
+        avg({{ typical_value('rated.' ~ m) }}) over typical_frame as typical_mean_{{ m }}{{ ',' if not loop.last }}  -- noqa: LT02, LT05
     {% endfor %}
     from rated
     window typical_frame as (
-        {{ typical_window('rated.station_id, rated.line_id, rated.service_hour, rated.day_type') }}
+        {{ typical_window_excluding('rated.station_id, rated.line_id, rated.service_hour, rated.day_type') }}
     )
 
 )
@@ -104,6 +127,7 @@ select
     cast(service_date as date) as service_date,
     cast(date_key as integer) as date_key,
     cast(day_type as varchar) as day_type,
+    cast(is_planned_change as boolean) as is_planned_change,
     cast(service_hour as integer) as service_hour,
     cast(runs_compared as bigint) as runs_compared,
     cast(positive_seconds as double) as train_delay_positive_seconds,

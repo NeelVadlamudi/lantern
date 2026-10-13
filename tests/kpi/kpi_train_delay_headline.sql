@@ -3,7 +3,9 @@
 -- and scheduled run time both positive; run = actual, minus the terminal platform hold when a
 -- run leaving a branch terminal is not the trip's first observed segment (LAMP move time here
 -- minus arrival at the terminal); positive = sum of max(run - scheduled, 0), net = sum of
--- (run - scheduled), per weekday and per run. Also checks that nothing is lost on the way: the
+-- (run - scheduled), per weekday and per run. Stop positions and the previous stop are as LAMP
+-- recorded the trip (fct_trip_stop_events recorded_*), so dropped duplicate events do not
+-- change a run. Also checks that nothing is lost on the way: the
 -- summary rows add up to the daily rows, runs_observed = compared + the four not-compared
 -- counts, and net = actual sum - hold inside actual - scheduled sum. Exact integer sums;
 -- averages to 1e-9 relative.
@@ -21,17 +23,15 @@ events as (
         events.*,
         dates.day_type,
         epoch(lamp.moved_at) as moved_epoch,
-        row_number() over trip_order as stop_position,
-        lag(events.station_id) over trip_order as previous_station_id,
-        lag(epoch(lamp.stopped_at)) over trip_order as previous_stopped_epoch
+        events.recorded_stop_position as stop_position,
+        events.previous_recorded_station_id as previous_station_id,
+        epoch(previous_lamp.stopped_at) as previous_stopped_epoch
     from {{ ref('fct_trip_stop_events') }} as events
     inner join {{ ref('dim_dates') }} as dates on events.date_key = dates.date_key
     left join {{ ref('stg_lamp__subway_trip_stops') }} as lamp
         on events.trip_stop_event_key = lamp.trip_stop_event_key
-    window trip_order as (
-        partition by events.trip_key
-        order by events.stop_sequence, events.event_local_at, events.trip_stop_event_key
-    )
+    left join {{ ref('stg_lamp__subway_trip_stops') }} as previous_lamp
+        on events.previous_recorded_event_key = previous_lamp.trip_stop_event_key
 ),
 
 compared as (

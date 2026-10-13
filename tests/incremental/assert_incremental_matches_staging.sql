@@ -1,8 +1,13 @@
 {{ config(enabled=var('check_incremental', false)) }}
 -- Incremental proof, step 3: fact rows per service date equal staging rows, so the delete+insert
--- dropped and doubled nothing.
+-- dropped and doubled nothing. Stop events dropped as duplicates of another trip id are counted
+-- on the event that was kept (duplicate_events_dropped), so kept + dropped = staged.
 with fact as (
-    select service_date, count(*) as n_rows from {{ ref('fct_trip_stop_events') }} group by 1
+    select
+        service_date,
+        count(*) + sum(duplicate_events_dropped) as n_rows
+    from {{ ref('fct_trip_stop_events') }}
+    group by 1
 ),
 
 staged as (

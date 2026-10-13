@@ -18,6 +18,13 @@
 --   train delay: mart_train_delay_summary, weekday and all_days rows
 --   rider time lost: mart_rider_time_lost_daily, averaged over weekdays (and all days) with a
 --     rider weight; *_with_gaps adds the gaps over 1 hour that count as passenger waits
+-- Planned service changes: the late, excess, long-gap and worst-line tiles and the late share's
+-- typical range leave out line-days with a planned change (is_planned_change on
+-- mart_line_daily_reliability); planned_change_line_days says how many, and *_incl_planned gives
+-- the value with them. The train delay, rider time lost and gate-entry tiles are whole-system
+-- daily totals and still include those days (planned_change_days_included = true).
+-- The late tile carries the MBTA's own published reliability target and 2024 result
+-- (seed board_reference_values) as labelled reference values, not as a comparison.
 
 with
 
@@ -38,8 +45,33 @@ system_wide as (
         cast(sum(late_trips_excl_long_runs) as bigint) as late_trips_excl_long_runs,
         sum(late_trips_excl_long_runs) / sum(trips_compared_excl_long_runs) as late_trip_share_excl_long_runs,
         sum(trip_excess_seconds_sum_excl_long_runs) / sum(trips_compared_excl_long_runs)
-            as avg_trip_excess_seconds_excl_long_runs
+            as avg_trip_excess_seconds_excl_long_runs,
+        cast(sum(unmatched_trips_compared) as bigint) as unmatched_trips_compared,
+        cast(sum(added_trips_compared) as bigint) as added_trips_compared
     from {{ ref('mart_line_daily_reliability') }}
+    where not is_planned_change
+),
+
+planned_excluded as (
+    select
+        count(*) filter (where is_planned_change) as planned_change_line_days,
+        count(*) as line_days,
+        sum(late_trips) / sum(trips_compared) as late_trip_share_incl_planned,
+        cast(sum(late_trips) as bigint) as late_trips_incl_planned,
+        cast(sum(trips_compared) as bigint) as trips_compared_incl_planned,
+        sum(long_gaps) / sum(headway_observations) as long_gap_share_incl_planned,
+        sum(trip_excess_seconds_sum) / sum(trips_compared) as avg_trip_excess_seconds_incl_planned
+    from {{ ref('mart_line_daily_reliability') }}
+),
+
+reference as (
+    select
+        max(value) filter (where reference_id = 'mbta_rapid_transit_reliability_target') as target_value,
+        max(label) filter (where reference_id = 'mbta_rapid_transit_reliability_target') as target_label,
+        max(value) filter (where reference_id = 'mbta_rapid_transit_reliability_2024') as result_2024_value,
+        max(label) filter (where reference_id = 'mbta_rapid_transit_reliability_2024') as result_2024_label,
+        max(source_url) filter (where reference_id = 'mbta_rapid_transit_reliability_2024') as source_url
+    from {{ ref('board_reference_values') }}
 ),
 
 -- the same pooled figures over weekdays only (secondary values for the board's day toggle)
@@ -55,7 +87,7 @@ weekday as (
         sum(trip_excess_seconds_sum_excl_long_runs) / sum(trips_compared_excl_long_runs)
             as avg_trip_excess_seconds_excl_long_runs
     from {{ ref('mart_line_daily_reliability') }}
-    where day_type = 'weekday'
+    where day_type = 'weekday' and not is_planned_change
 ),
 
 exposure as (
@@ -101,6 +133,7 @@ paired_days as (
     from {{ ref('mart_line_daily_reliability') }} as daily
     cross join worst_late
     cross join runner_up_late
+    where not daily.is_planned_change
     group by daily.service_date, daily.day_type
 ),
 
@@ -133,7 +166,7 @@ weekday_lines as (
         ) as weekday_rank
     from {{ ref('mart_line_daily_reliability') }} as daily
     inner join {{ ref('dim_routes') }} as routes on daily.route_id = routes.route_id
-    where daily.day_type = 'weekday'
+    where daily.day_type = 'weekday' and not daily.is_planned_change
     group by daily.route_id, routes.display_name
 ),
 
@@ -214,37 +247,62 @@ rider_time as (
     where has_rider_data
 ),
 
--- typical range of the daily system values behind the headline tiles: p25, median and p75 of
--- one value per service date (mart_line_day_metrics, scope 'system')
+-- the daily system late share over the line-days without a planned change, one value per date
+late_by_date as (
+    select
+        service_date,
+        any_value(day_type) as day_type,
+        sum(late_trips) / sum(trips_compared) as late_trip_share
+    from {{ ref('mart_line_daily_reliability') }}
+    where not is_planned_change
+    group by service_date
+    having sum(trips_compared) > 0
+),
+
+late_range as (
+    select
+        count(*) as late_days,
+        quantile_cont(late_trip_share, 0.25) as late_p25,
+        median(late_trip_share) as late_median,
+        quantile_cont(late_trip_share, 0.75) as late_p75,
+        count(*) filter (where day_type = 'weekday') as late_weekdays,
+        quantile_cont(late_trip_share, 0.25) filter (where day_type = 'weekday') as late_weekday_p25,
+        median(late_trip_share) filter (where day_type = 'weekday') as late_weekday_median,
+        quantile_cont(late_trip_share, 0.75) filter (where day_type = 'weekday') as late_weekday_p75
+    from late_by_date
+),
+
+-- typical range of the daily system train delay: p25, median and p75 of one value per weekday
+-- (mart_line_day_metrics, scope 'system', all days as the tile itself)
+system_weekday_delay as (
+    select
+        measure = 'train_delay_positive_seconds' as is_delay_row,
+        case when measure = 'train_delay_positive_seconds' then value end as delay_value,
+        case when measure = 'train_delay_positive_per_run_seconds' then value end as per_run_value
+    from {{ ref('mart_line_day_metrics') }}
+    where scope_id = 'system' and day_type = 'weekday'
+),
+
 daily_range as (
     select
-        count(*) filter (where measure = 'late_trip_share') as late_days,
-        quantile_cont(value, 0.25) filter (where measure = 'late_trip_share') as late_p25,
-        median(value) filter (where measure = 'late_trip_share') as late_median,
-        quantile_cont(value, 0.75) filter (where measure = 'late_trip_share') as late_p75,
-        count(*) filter (where measure = 'late_trip_share' and day_type = 'weekday') as late_weekdays,
-        quantile_cont(value, 0.25) filter (where measure = 'late_trip_share' and day_type = 'weekday')
-            as late_weekday_p25,
-        median(value) filter (where measure = 'late_trip_share' and day_type = 'weekday') as late_weekday_median,
-        quantile_cont(value, 0.75) filter (where measure = 'late_trip_share' and day_type = 'weekday')
-            as late_weekday_p75,
-        count(*) filter (where measure = 'train_delay_positive_seconds' and day_type = 'weekday') as delay_weekdays,
-        quantile_cont(value, 0.25) filter (where measure = 'train_delay_positive_seconds' and day_type = 'weekday')
-            as delay_weekday_p25,
-        median(value) filter (where measure = 'train_delay_positive_seconds' and day_type = 'weekday')
-            as delay_weekday_median,
-        quantile_cont(value, 0.75) filter (where measure = 'train_delay_positive_seconds' and day_type = 'weekday')
-            as delay_weekday_p75,
-        quantile_cont(value, 0.25) filter (
-            where measure = 'train_delay_positive_per_run_seconds' and day_type = 'weekday'
-        ) as per_run_weekday_p25,
-        median(value) filter (where measure = 'train_delay_positive_per_run_seconds' and day_type = 'weekday')
-            as per_run_weekday_median,
-        quantile_cont(value, 0.75) filter (
-            where measure = 'train_delay_positive_per_run_seconds' and day_type = 'weekday'
-        ) as per_run_weekday_p75
-    from {{ ref('mart_line_day_metrics') }}
-    where scope_id = 'system'
+        late_range.late_days,
+        late_range.late_p25,
+        late_range.late_median,
+        late_range.late_p75,
+        late_range.late_weekdays,
+        late_range.late_weekday_p25,
+        late_range.late_weekday_median,
+        late_range.late_weekday_p75,
+        count(*) filter (where delays.is_delay_row) as delay_weekdays,
+        quantile_cont(delays.delay_value, 0.25) as delay_weekday_p25,
+        median(delays.delay_value) as delay_weekday_median,
+        quantile_cont(delays.delay_value, 0.75) as delay_weekday_p75,
+        quantile_cont(delays.per_run_value, 0.25) as per_run_weekday_p25,
+        median(delays.per_run_value) as per_run_weekday_median,
+        quantile_cont(delays.per_run_value, 0.75) as per_run_weekday_p75
+    from system_weekday_delay as delays
+    cross join late_range
+    group by all
 ),
 
 freshness as (
@@ -264,6 +322,7 @@ tiles as (
         json_object(
             'id', 'train_delay_weekday',
             'label', 'Train time over schedule',
+            'planned_change_days_included', true,
             'day_basis', 'weekday',
             'is_estimate', false,
             'value', train_delay.weekday_seconds,
@@ -345,6 +404,7 @@ tiles as (
         json_object(
             'id', 'rider_time_lost',
             'label', 'Rider time lost beyond the schedule (estimate)',
+            'planned_change_days_included', true,
             'day_basis', 'weekday',
             'is_estimate', true,
             'value', rider_time.weekday_seconds,
@@ -400,7 +460,7 @@ tiles as (
         null as value_text,
         json_object(
             'id', 'late_trip_share',
-            'label', 'Trips 5+ min behind schedule',
+            'label', 'Train runs 5+ min over scheduled run time',
             'day_basis', 'all_days',
             'value', {{ board_round('system_wide.late_trip_share', 4) }},
             'display', printf('%.1f%%', 100 * system_wide.late_trip_share),
@@ -408,8 +468,26 @@ tiles as (
             'display_weekday', printf('%.1f%%', 100 * weekday.late_trip_share),
             'late_trips', system_wide.late_trips,
             'trips_compared', system_wide.trips_compared,
+            'trip_basis', 'matched trips: trip id in the GTFS schedule published for the date',
+            'unmatched_trips_compared', system_wide.unmatched_trips_compared,
+            'added_trips_compared', system_wide.added_trips_compared,
+            'planned_change_line_days', planned_excluded.planned_change_line_days,
+            'line_days', planned_excluded.line_days,
+            'value_incl_planned', planned_excluded.late_trip_share_incl_planned,
+            'late_trips_incl_planned', planned_excluded.late_trips_incl_planned,
+            'trips_compared_incl_planned', planned_excluded.trips_compared_incl_planned,
+            'mbta_reference', json_object(
+                'note', 'The MBTA''s own measure (excess trip time, per rider, Red, Orange and Blue lines)'
+                || ' is a different measure from this one; shown for reference, not compared.',
+                'target_value', reference.target_value,
+                'target_label', reference.target_label,
+                'result_2024_value', reference.result_2024_value,
+                'result_2024_label', reference.result_2024_label,
+                'source_url', reference.source_url
+            ),
             'typical_range', json_object(
-                'rule', 'p25, median and p75 of the daily system late share, one value per service date',
+                'rule', 'p25, median and p75 of the daily system share over line-days without a planned'
+                || ' service change, one value per service date',
                 'days', daily_range.late_days,
                 'p25', daily_range.late_p25,
                 'median', daily_range.late_median,
@@ -427,17 +505,25 @@ tiles as (
             'trips_compared_excl_long_runs', system_wide.trips_compared_excl_long_runs,
             'value_weekday_excl_long_runs', weekday.late_trip_share_excl_long_runs,
             'sentence', 'Over all days, ' || printf('%.1f%%', 100 * system_wide.late_trip_share)
-            || ' of train runs took more than 5 minutes longer than scheduled.',
+            || ' of train runs took more than 5 minutes over their scheduled run time.',
             'explainer', 'Of ' || format('{:,}', system_wide.trips_compared)
-            || ' subway train runs compared to the schedule on all days (weekdays, weekends and'
-            || ' holidays), this share took more than 5 minutes longer than scheduled between their'
-            || ' first and last compared stops. Stop-to-stop runs over 30 minutes are included ('
+            || ' scheduled subway train runs compared to the timetable on all days (weekdays, weekends'
+            || ' and holidays), this share took more than 5 minutes over the scheduled run time between'
+            || ' their first and last compared stops. Line-days with a planned service change ('
+            || format('{:,}', planned_excluded.planned_change_line_days) || ' of '
+            || format('{:,}', planned_excluded.line_days) || ') are left out; with them the share is '
+            || printf('%.1f%%', 100 * planned_excluded.late_trip_share_incl_planned) || '. Runs whose trip'
+            || ' id is not in the day''s schedule (' || format('{:,}', system_wide.unmatched_trips_compared)
+            || ') are not counted. Stop-to-stop runs over 30 minutes are included ('
             || format('{:,}', system_wide.trips_with_long_runs) || ' runs had one); without them the'
             || ' share is ' || printf('%.1f%%', 100 * system_wide.late_trip_share_excl_long_runs) || '.'
+            || ' This is per train against the timetable, not the MBTA''s per-rider excess trip time.'
         ) as tile
     from system_wide
     cross join weekday
     cross join daily_range
+    cross join planned_excluded
+    cross join reference
 
     union all
 
@@ -461,6 +547,8 @@ tiles as (
             'value_label', {{ format_duration('system_wide.avg_trip_excess_seconds') }},
             'value_weekday_seconds', weekday.avg_trip_excess_seconds,
             'value_weekday_label', {{ format_duration('weekday.avg_trip_excess_seconds') }},
+            'planned_change_line_days', planned_excluded.planned_change_line_days,
+            'value_incl_planned_seconds', planned_excluded.avg_trip_excess_seconds_incl_planned,
             'long_run_comparisons', system_wide.long_run_comparisons,
             'long_run_excess_seconds_sum', system_wide.long_run_excess_seconds_sum,
             'value_excl_long_runs_seconds', system_wide.avg_trip_excess_seconds_excl_long_runs,
@@ -479,9 +567,11 @@ tiles as (
             || '-minute scheduled run. Small on average; the late tail is what riders feel. Stop-to-stop'
             || ' runs over 30 minutes are included; without them the average is '
             || {{ format_duration('system_wide.avg_trip_excess_seconds_excl_long_runs') }} || '.'
+            || ' Matched trips only; line-days with a planned service change are left out.'
         ) as tile
     from system_wide
     cross join weekday
+    cross join planned_excluded
 
     union all
 
@@ -499,14 +589,19 @@ tiles as (
             'display', printf('%.1f%%', 100 * system_wide.long_gap_share),
             'value_weekday', {{ board_round('weekday.long_gap_share', 4) }},
             'display_weekday', printf('%.1f%%', 100 * weekday.long_gap_share),
+            'planned_change_line_days', planned_excluded.planned_change_line_days,
+            'value_incl_planned', planned_excluded.long_gap_share_incl_planned,
             'sentence', 'Over all days, ' || printf('%.1f%%', 100 * system_wide.long_gap_share)
             || ' of train departures came after a gap more than 1.5 times the scheduled one.',
             'explainer', 'Share of ' || format('{:,}', system_wide.headway_observations)
             || ' train departures from stations on all days (weekdays, weekends and holidays) where'
             || ' the gap since the previous train on the line was more than 1.5 times the scheduled gap.'
+            || ' Line-days with a planned service change are left out; with them it is '
+            || printf('%.1f%%', 100 * planned_excluded.long_gap_share_incl_planned) || '.'
         ) as tile
     from system_wide
     cross join weekday
+    cross join planned_excluded
 
     union all
 
@@ -519,6 +614,7 @@ tiles as (
         json_object(
             'id', 'weekday_entries_in_long_gaps',
             'label', 'Weekday gate entries during long gaps',
+            'planned_change_days_included', true,
             'day_basis', 'weekday',
             'value', cast(round_even(weekday_entries_in_long_gaps, 0) as bigint),
             'display', printf('~%.1fk', weekday_entries_in_long_gaps / 1000),
@@ -546,7 +642,7 @@ tiles as (
         worst_late.route_id as value_text,
         json_object(
             'id', 'worst_line',
-            'label', 'Line most often behind schedule',
+            'label', 'Line with the most train runs 5+ min over scheduled run time',
             'day_basis', 'all_days',
             'value', worst_late.route_id,
             'display', worst_late.display_name,
@@ -590,9 +686,9 @@ tiles as (
                     then 'A tie overall between ' || worst_late.display_name || ' and '
                         || runner_up_late.display_name || ' (' || printf('%.1f%%', 100 * worst_late.late_trip_share)
                         || ' and ' || printf('%.1f%%', 100 * runner_up_late.late_trip_share)
-                        || ' of trips 5+ minutes late)'
-                else worst_late.display_name || ' had the highest share of trips 5+ minutes late over all'
-                    || ' days (' || printf('%.1f%%', 100 * worst_late.late_trip_share) || ')'
+                        || ' of train runs 5+ min over scheduled run time)'
+                else worst_late.display_name || ' had the highest share of train runs 5+ min over scheduled'
+                    || ' run time over all days (' || printf('%.1f%%', 100 * worst_late.late_trip_share) || ')'
             end
             || case
                 when abs(paired.weekday_paired_t) >= {{ var('tie_t') }} and paired.weekday_mean_diff_share > 0
@@ -602,12 +698,13 @@ tiles as (
                 else '.'
             end,
             'explainer', 'Over all days, ' || worst_late.display_name
-            || ' had the highest share of trips 5+ minutes late ('
+            || ' had the highest share of train runs 5+ min over scheduled run time ('
             || printf('%.1f%%', 100 * worst_late.late_trip_share)
             || '). Relative to scheduled run time, ' || worst_relative.display_name || ' ran furthest over ('
             || printf('%.1f%%', 100 * worst_relative.excess_share_of_scheduled) || '). '
             || worst_gap.display_name || ' had the most long gaps ('
-            || printf('%.1f%%', 100 * worst_gap.long_gap_share) || ').'
+            || printf('%.1f%%', 100 * worst_gap.long_gap_share) || '). Line-days with a planned service'
+            || ' change are left out (' || worst_late.planned_change_days || ' for ' || worst_late.display_name || ').'
         ) as tile
     from worst_late
     cross join runner_up_late

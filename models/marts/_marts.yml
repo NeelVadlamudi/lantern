@@ -451,6 +451,24 @@ models:
         description: >-
           True for trips not in the published schedule (trip id ADDED-*). LAMP matches them to the closest
           scheduled trip for the scheduled_* values.
+      - name: is_matched_trip
+        data_type: boolean
+        description: 'True when the trip id is a trip in the GTFS schedule published for the service date (int_scheduled_subway_trips).'
+        data_tests: [not_null]
+      - name: duplicate_events_dropped
+        data_type: bigint
+        description: 'Stop events dropped as the same train set recorded again at this station and direction within var duplicate_event_seconds (60 s) under another trip id; they are counted on the event that was kept.'
+        data_tests: [not_null]
+      - name: recorded_stop_position
+        data_type: bigint
+        description: 'Position of the event in its trip as LAMP recorded it (by stop_sequence, time, key), before duplicate events were dropped.'
+        data_tests: [not_null]
+      - name: previous_recorded_event_key
+        data_type: varchar
+        description: 'trip_stop_event_key of the stop LAMP recorded before this one on the trip (null on the first), kept even when that event was dropped as a duplicate.'
+      - name: previous_recorded_station_id
+        data_type: varchar
+        description: 'Station of that previous recorded stop.'
       - name: event_local_at
         data_type: timestamp
         description: Boston local time the train stopped at the stop (or started toward it if no stop
@@ -586,6 +604,13 @@ models:
       - name: is_added_trip
         data_type: boolean
         description: Trip not in the published schedule.
+      - name: is_matched_trip
+        data_type: boolean
+        description: 'True when the trip id is in the GTFS schedule published for the date. Trip measures (late share, time over schedule) use matched trips only.'
+        data_tests: [not_null]
+      - name: duplicate_events_dropped
+        data_type: bigint
+        description: "Duplicate stop events of other trip ids folded into this trip's events (fct_trip_stop_events)."
       - name: first_event_local_at
         data_type: timestamp
         description: Boston local time of the first observed stop.
@@ -689,7 +714,26 @@ models:
           - not_null
       - name: trips_compared
         data_type: bigint
-        description: Trips with at least one stop-to-stop segment that could be compared to schedule.
+        description: Matched trips (trip id in the day's GTFS schedule) with at least one stop-to-stop segment compared to schedule; the late-share denominator.
+      - name: unmatched_trips_compared
+        data_type: bigint
+        description: "Compared runs whose trip id is not in the day's GTFS schedule (left out of the trip measures)."
+        data_tests: [not_null]
+      - name: added_trips_compared
+        data_type: bigint
+        description: 'Of unmatched_trips_compared, the runs LAMP marks as added (ADDED- ids).'
+        data_tests: [not_null]
+      - name: all_trips_compared
+        data_type: bigint
+        description: 'trips_compared + unmatched_trips_compared: every compared run.'
+        data_tests: [not_null]
+      - name: is_planned_change
+        data_type: boolean
+        description: 'The line-day had a planned service change (mart_planned_change_line_days). Kept here; left out of headline tiles, line totals and typical values.'
+        data_tests: [not_null]
+      - name: planned_change_label
+        data_type: varchar
+        description: 'Plain label of the planned change types; null on days without one.'
       - name: trip_stop_events
         data_type: bigint
         description: Train arrivals at stops observed.

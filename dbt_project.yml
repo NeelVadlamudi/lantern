@@ -18,6 +18,7 @@ vars:
   bunched_ratio: 0.5           # actual headway / scheduled headway below this = bunched
   late_trip_seconds: 300       # a trip running this much over its scheduled run time counts as late
   travel_outlier_seconds: 1800 # a stop-to-stop run above this is a long run: kept in every figure and also shown on its own
+  duplicate_event_seconds: 60  # one train set at one station and direction within this many seconds under two trip ids = one stop event
   incremental_lookback_days: 3 # LAMP republishes recent days; reprocess this many trailing days
   rider_basis_days: 56         # days of gated entries used to estimate riders exposed
   # Decision metrics (rider time lost, segments, trends). See README "Decision metrics".
@@ -26,6 +27,8 @@ vars:
   worse_prior_days: 28         # ... compared with the N dates before them
   worst_window_days: 14        # worst window: the N consecutive calendar days with the largest share of a segment's train delay
   completeness_min_share: 0.8  # completeness: a line-day is flagged low when trips compared / trips scheduled is below this
+  planned_notice_hours: 24     # service changes: an alert created at least this long before it starts counts as planned
+  green_trunk_min_allowance_seconds: 180 # rider headway adherence: allowed wait on the Green Line trunk is at least this (SDP)
   tie_t: 1.96                  # worst line: a day-paired difference with |t| below this reads as a tie
   bunched_max_seconds: 120     # bunched: a departure less than this after the previous train (SFMTA rule, via Swiftly)
   gapped_extra_seconds: 300    # gapped: a gap more than the scheduled gap plus this (SFMTA rule, via Swiftly)

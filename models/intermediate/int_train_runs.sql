@@ -4,6 +4,10 @@
 -- observed stop to this one; it spans any stops not observed in between). Every run is kept,
 -- compared to the schedule or not. One definition for mart_train_delay_daily (all runs) and
 -- fct_segment_traversals (runs over a dim_segments segment).
+-- The previous stop is the one LAMP recorded before this event (fct_trip_stop_events
+-- previous_recorded_*), also when that stop event was dropped as a duplicate of another trip
+-- id: the run is the stretch LAMP timed. Runs into a dropped stop event are not here; the trip
+-- that kept the event has its own run into that stop.
 -- Stops are ordered by stop_sequence, then event time and key (some trips repeat a
 -- stop_sequence, e.g. Mattapan and Union Square trips starting at either end).
 --
@@ -52,14 +56,11 @@ events as (
         fct.*,
         {{ to_boston_time('stops.moved_at') }} as departed_start_at,
         {{ to_boston_time('stops.stopped_at') }} as arrived_at,
-        lag(fct.station_id) over trip_window as previous_station_id,
-        lag({{ to_boston_time('stops.stopped_at') }}) over trip_window as arrived_start_at,
-        row_number() over trip_window as stop_position
+        fct.previous_recorded_station_id as previous_station_id,
+        {{ to_boston_time('previous_stops.stopped_at') }} as arrived_start_at
     from {{ ref('fct_trip_stop_events') }} as fct
     left join stops on fct.trip_stop_event_key = stops.trip_stop_event_key
-    window trip_window as (
-        partition by fct.trip_key order by fct.stop_sequence, fct.event_local_at, fct.trip_stop_event_key
-    )
+    left join stops as previous_stops on fct.previous_recorded_event_key = previous_stops.trip_stop_event_key
 
 ),
 
@@ -89,7 +90,7 @@ timed as (
     select
         events.*,
         dates.day_type,
-        events.stop_position = 2 as is_first_observed_segment,
+        events.recorded_stop_position = 2 as is_first_observed_segment,
         coalesce(events.previous_station_id = branch_ends.first_station_id, false) as is_terminal_departure,
         coalesce(events.station_id = branch_ends.last_station_id, false) as is_terminal_arrival,
         case
@@ -108,7 +109,7 @@ timed as (
         on
             events.branch_route_id = branch_ends.branch_route_id
             and events.direction_id = branch_ends.direction_id
-    where events.stop_position > 1
+    where events.recorded_stop_position > 1
 
 ),
 

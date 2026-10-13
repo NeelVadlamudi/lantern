@@ -46,7 +46,7 @@ scoped as (
 
 ),
 
-typed as (
+typed_base as (
 
     select
         scoped.*,
@@ -54,6 +54,29 @@ typed as (
         dates.day_type
     from scoped
     inner join {{ ref('dim_dates') }} as dates on scoped.service_date = dates.date_day
+
+),
+
+typed_flagged as (
+
+    select
+        typed_base.*,
+        coalesce(planned.is_planned_change, false) as is_planned_change
+    from typed_base
+    left join {{ ref('mart_planned_change_scope_days') }} as planned
+        on
+            planned.scope_type = 'route'
+            and typed_base.scope_id = planned.scope_id
+            and typed_base.service_date = planned.service_date
+
+),
+
+typed as (
+
+    select
+        typed_flagged.*,
+        {{ planned_baseline_key('scope_id, segment_id, day_type') }} as baseline_key
+    from typed_flagged
 
 ),
 
@@ -65,11 +88,11 @@ typical as (
             partition by typed.scope_id, typed.service_date
             order by typed.positive_excess_seconds desc, typed.segment_id asc
         ) as day_rank,
-        median(typed.positive_excess_seconds) over typical_frame as typical_median,
-        avg(typed.positive_excess_seconds) over typical_frame as typical_mean,
-        count(typed.positive_excess_seconds) over typical_frame as typical_days
+        median({{ typical_value('typed.positive_excess_seconds') }}) over typical_frame as typical_median,
+        avg({{ typical_value('typed.positive_excess_seconds') }}) over typical_frame as typical_mean,
+        count({{ typical_value('typed.positive_excess_seconds') }}) over typical_frame as typical_days
     from typed
-    window typical_frame as ({{ typical_window('typed.scope_id, typed.segment_id, typed.day_type') }})
+    window typical_frame as ({{ typical_window_excluding('typed.scope_id, typed.segment_id, typed.day_type') }})
 
 )
 
@@ -80,6 +103,7 @@ select
     cast(typical.service_date as date) as service_date,
     cast(typical.date_key as integer) as date_key,
     cast(typical.day_type as varchar) as day_type,
+    cast(typical.is_planned_change as boolean) as is_planned_change,
     cast(typical.segment_id as varchar) as segment_id,
     cast(segments.line_id as varchar) as line_id,
     cast(segments.direction_id as integer) as direction_id,

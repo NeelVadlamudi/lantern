@@ -16,7 +16,9 @@ daily as (
     from {{ ref('fct_trips') }} as trips
     inner join {{ ref('dim_dates') }} as dates on trips.service_date = dates.date_day
     cross join tile
-    where trips.compared_segments > 0
+    inner join {{ ref('mart_planned_change_line_days') }} as planned
+        on trips.route_id = planned.route_id and trips.service_date = planned.service_date
+    where trips.compared_segments > 0 and trips.is_matched_trip and not planned.is_planned_change
     group by trips.service_date, dates.day_type
 ),
 

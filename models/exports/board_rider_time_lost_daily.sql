@@ -10,9 +10,31 @@
 -- the entries at station, line and period cells with no recorded train that date are kept in
 -- their own column (cells_no_trains counts those cells).
 
+with daily as (
+    select * from {{ ref('mart_rider_time_lost_daily') }}
+),
+
+planned as (
+    select * from {{ ref('mart_planned_change_scope_days') }}
+    where scope_type = 'route' and scope_id = 'system'
+),
+
+flagged as (
+    select
+        daily.*,
+        coalesce(planned.is_planned_change, false) as is_planned_change,
+        coalesce(planned.planned_change_lines, 0) as planned_change_lines,
+        planned.planned_change_label
+    from daily
+    left join planned on daily.service_date = planned.service_date
+)
+
 select
     service_date,
     day_type,
+    is_planned_change,
+    planned_change_lines,
+    planned_change_label,
     is_holiday,
     holiday_name,
     week_start_date,
@@ -40,5 +62,5 @@ select
     waited_gap_seconds,
     non_wait_gap_count,
     non_wait_gap_seconds
-from {{ ref('mart_rider_time_lost_daily') }}
+from flagged
 order by service_date

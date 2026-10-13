@@ -6,6 +6,9 @@
 -- included like every other compared run. Their part is also given on its own (long_run_*),
 -- and the *_excl_long_runs columns give the same measures without them, so
 -- trip_excess_seconds = trip_excess_seconds_excl_long_runs + long_run_excess_seconds.
+-- is_matched_trip: the trip id is in the GTFS schedule published for the date. Trip measures on
+-- the board (late share, average time over schedule) use matched trips; added trips are counted
+-- on their own. Duplicate stop events are already removed (fct_trip_stop_events).
 
 with events as (
 
@@ -23,6 +26,8 @@ select
     cast(max(trip_id) as varchar) as trip_id,
     cast(max(vehicle_label) as varchar) as vehicle_label,
     cast(bool_or(is_added_trip) as boolean) as is_added_trip,
+    cast(bool_or(is_matched_trip) as boolean) as is_matched_trip,
+    cast(sum(duplicate_events_dropped) as bigint) as duplicate_events_dropped,
     cast(min(event_local_at) as timestamp) as first_event_local_at,
     cast(arg_min(service_period_id, event_local_at) as varchar) as start_service_period_id,
     cast(count(*) as bigint) as trip_stop_events,

@@ -1,4 +1,5 @@
 -- Grain: one row per line (GTFS route), day type and service period, over the loaded window.
+-- Trip measures use matched trips; stop-level measures use every stop event.
 
 with events as (
 
@@ -19,6 +20,8 @@ trips as (
     from {{ ref('fct_trips') }} as t
     inner join {{ ref('dim_dates') }} as d
         on t.date_key = d.date_key
+    -- trip measures use matched trips (trip id in the day's GTFS schedule), as on the line-day mart
+    where t.is_matched_trip
 
 ),
 

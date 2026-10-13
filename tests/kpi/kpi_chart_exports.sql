@@ -14,7 +14,7 @@ expected as (
         'trip' as kind,
         count(*) as n
     from {{ ref('fct_trips') }}
-    where compared_segments > 0
+    where compared_segments > 0 and is_matched_trip
     union all
     select
         'run' as kind,

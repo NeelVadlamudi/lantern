@@ -11,6 +11,7 @@ select
     delay.scope_id,
     delay.service_date,
     delay.day_type,
+    delay.is_planned_change,
     delay.day_rank,
     delay.segment_id,
     segments.segment_name,

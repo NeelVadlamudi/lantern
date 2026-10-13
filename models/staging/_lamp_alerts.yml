@@ -1,0 +1,46 @@
+version: 2
+
+models:
+  - name: stg_lamp__rt_alerts
+    description: >-
+      MBTA service alerts as LAMP archived them (source lamp.lamp_rt_alerts,
+      performancedata.mbta.com LAMP_RT_ALERTS.parquet). Grain: one row per alert version, active
+      period and informed entity. Kept: subway and light rail entities (route_type 0 or 1);
+      accessibility alerts (elevators, escalators) are left out. Times are Boston local.
+    columns:
+      - name: alert_id
+        description: 'MBTA alert id.'
+        data_tests: [not_null]
+      - name: alert_version_timestamp
+        description: 'Version of the alert (epoch seconds of the LAMP snapshot); an alert is republished when it changes.'
+        data_tests: [not_null]
+      - name: created_at
+        description: 'When the MBTA created the alert.'
+      - name: closed_at
+        description: 'When the MBTA closed the alert (null while open).'
+      - name: cause
+        description: 'GTFS-RT cause (MAINTENANCE, CONSTRUCTION, ...).'
+      - name: effect
+        description: 'GTFS-RT effect (DETOUR, REDUCED_SERVICE, ...).'
+      - name: effect_detail
+        description: 'MBTA effect detail (SHUTTLE, SUSPENSION, STATION_CLOSURE, SERVICE_CHANGE, DELAY, ...).'
+      - name: severity_level
+        description: 'MBTA severity level.'
+      - name: header_text
+        description: 'Alert header text (English).'
+      - name: active_start_at
+        description: 'Start of an active period of that version.'
+      - name: active_end_at
+        description: 'End of the active period (null when open-ended).'
+      - name: route_id
+        description: 'GTFS route id of the informed entity.'
+      - name: route_type
+        description: 'GTFS route type (0 light rail, 1 subway).'
+        data_tests:
+          - accepted_values:
+              arguments:
+                values: [0, 1]
+      - name: direction_id
+        description: 'Direction of the informed entity (null for both).'
+      - name: stop_id
+        description: 'GTFS stop id of the informed entity (null for the whole route).'

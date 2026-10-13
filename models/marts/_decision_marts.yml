@@ -1364,12 +1364,22 @@ models:
         data_tests:
           - unique
           - not_null
+      - name: first_service_date
+        data_type: date
+        description: First service date with a compared run on the line (start of the window the buffer is computed over).
+        data_tests:
+          - not_null
+      - name: last_service_date
+        data_type: date
+        description: Last service date with a compared run on the line (end of that window).
+        data_tests:
+          - not_null
       - name: segments
         data_type: integer
         description: Segments with compared runs.
       - name: traversals
         data_type: bigint
-        description: Compared runs over those segments.
+        description: Compared train runs over those segments (the run count; each run is one traversal of one segment).
         data_tests:
           - not_null
       - name: avg_segment_median_run_seconds

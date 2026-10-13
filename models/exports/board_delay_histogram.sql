@@ -9,6 +9,14 @@
 -- stored, and observations over all bins equal total_observations.
 -- The hash surrogate key is left out of the file; the grain columns identify each row.
 
-select * exclude (histogram_bin_key)
-from {{ ref('mart_delay_histogram') }}
-order by kind, scope_id, service_date, bin_minute
+select
+    histogram.* exclude (histogram_bin_key),  -- noqa: RF02
+    coalesce(planned.is_planned_change, false) as is_planned_change,
+    planned.planned_change_label
+from {{ ref('mart_delay_histogram') }} as histogram
+left join {{ ref('mart_planned_change_scope_days') }} as planned
+    on
+        planned.scope_type = 'route'
+        and histogram.scope_id = planned.scope_id
+        and histogram.service_date = planned.service_date
+order by histogram.kind, histogram.scope_id, histogram.service_date, histogram.bin_minute

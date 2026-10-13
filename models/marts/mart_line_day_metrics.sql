@@ -15,8 +15,15 @@
 --   departures_compared, bunched_share, gapped_share 2 min / over scheduled + 5 min)
 --   scheduled_trips, completeness_share              mart_line_day_completeness (trips compared /
 --                                                    trips in the GTFS schedule for the date)
+--   unmatched_trips_compared, added_trips_compared   compared runs whose trip id is not in the
+--                                                    day's schedule (not in the late share)
 -- Shares and per-run values are the day's own ratio (numerator / denominator, both given); the
 -- typical value is the median or mean of the earlier days' ratios.
+-- Planned service changes (mart_planned_change_line_days): is_planned_change is the line-day's
+-- flag for a route, any branch for 'Green', any line for 'system' (planned_change_lines counts
+-- them). Every day keeps its row and label, but the typical value is taken only from earlier
+-- days without a planned change: the var('typical_days') most recent earlier days of the same
+-- day type with is_planned_change false.
 
 with adherence_days as (
 
@@ -74,6 +81,8 @@ line_days as (
         service_date,
         late_trips,
         trips_compared,
+        unmatched_trips_compared,
+        added_trips_compared,
         long_gaps,
         headway_observations
     from {{ ref('mart_line_daily_reliability') }}
@@ -85,6 +94,8 @@ line_days as (
         service_date,
         sum(late_trips) as late_trips,
         sum(trips_compared) as trips_compared,
+        sum(unmatched_trips_compared) as unmatched_trips_compared,
+        sum(added_trips_compared) as added_trips_compared,
         sum(long_gaps) as long_gaps,
         sum(headway_observations) as headway_observations
     from {{ ref('mart_line_daily_reliability') }}
@@ -97,9 +108,54 @@ line_days as (
         service_date,
         sum(late_trips) as late_trips,
         sum(trips_compared) as trips_compared,
+        sum(unmatched_trips_compared) as unmatched_trips_compared,
+        sum(added_trips_compared) as added_trips_compared,
         sum(long_gaps) as long_gaps,
         sum(headway_observations) as headway_observations
     from {{ ref('mart_line_daily_reliability') }}
+    where route_id like 'Green-%'
+    group by service_date
+
+),
+
+planned_days as (
+
+    select
+        route_id as scope_id,
+        service_date,
+        is_planned_change,
+        cast(is_planned_change as integer) as planned_change_lines,
+        planned_change_label
+    from {{ ref('mart_planned_change_line_days') }}
+
+    union all
+
+    select
+        'system' as scope_id,
+        service_date,
+        bool_or(is_planned_change) as is_planned_change,
+        count(*) filter (where is_planned_change) as planned_change_lines,
+        case
+            when bool_or(is_planned_change)
+                then 'Planned service change on '
+                    || string_agg(route_id, ', ' order by route_id) filter (where is_planned_change)
+        end as planned_change_label
+    from {{ ref('mart_planned_change_line_days') }}
+    group by service_date
+
+    union all
+
+    select
+        'Green' as scope_id,
+        service_date,
+        bool_or(is_planned_change) as is_planned_change,
+        count(*) filter (where is_planned_change) as planned_change_lines,
+        case
+            when bool_or(is_planned_change)
+                then 'Planned service change on '
+                    || string_agg(route_id, ', ' order by route_id) filter (where is_planned_change)
+        end as planned_change_label
+    from {{ ref('mart_planned_change_line_days') }}
     where route_id like 'Green-%'
     group by service_date
 
@@ -160,6 +216,8 @@ joined_days as (
         coalesce(line_days.service_date, delay_days.service_date) as service_date,
         line_days.late_trips,
         line_days.trips_compared,
+        line_days.unmatched_trips_compared,
+        line_days.added_trips_compared,
         line_days.long_gaps,
         line_days.headway_observations,
         delay_days.runs_compared,
@@ -199,6 +257,8 @@ measures as (
     {% set measures = [
         ('late_trips', 'count', 'late_trips', 'null', 'null'),
         ('trips_compared', 'count', 'trips_compared', 'null', 'null'),
+        ('unmatched_trips_compared', 'count', 'unmatched_trips_compared', 'null', 'null'),
+        ('added_trips_compared', 'count', 'added_trips_compared', 'null', 'null'),
         ('late_trip_share', 'share', 'late_trips / nullif(trips_compared, 0)', 'late_trips', 'trips_compared'),
         ('runs_compared', 'count', 'runs_compared', 'null', 'null'),
         ('train_delay_positive_seconds', 'seconds', 'positive_seconds', 'null', 'null'),
@@ -243,9 +303,40 @@ typed as (
     select
         measures.*,
         dates.date_key,
-        dates.day_type
+        dates.day_type,
+        coalesce(planned_days.is_planned_change, false) as is_planned_change,
+        coalesce(planned_days.planned_change_lines, 0) as planned_change_lines,
+        planned_days.planned_change_label
     from measures
     inner join {{ ref('dim_dates') }} as dates on measures.service_date = dates.date_day
+    left join planned_days
+        on measures.scope_id = planned_days.scope_id and measures.service_date = planned_days.service_date
+
+),
+
+-- typical statistics as of each day without a planned change, over it and the earlier such days
+-- (var('typical_days') rows); each day then takes the last such row strictly before it
+baseline as (
+
+    select
+        scope_id,
+        measure,
+        day_type,
+        service_date,
+        median(value) over baseline_frame as typical_median,
+        avg(value) over baseline_frame as typical_mean,
+        quantile_cont(value, 0.25) over baseline_frame as typical_p25,
+        quantile_cont(value, 0.75) over baseline_frame as typical_p75,
+        count(value) over baseline_frame as typical_days,
+        min(service_date) over baseline_frame as typical_first_date,
+        max(service_date) over baseline_frame as typical_last_date
+    from typed
+    where not is_planned_change
+    window baseline_frame as (
+        partition by scope_id, measure, day_type
+        order by service_date
+        rows between {{ var('typical_days') - 1 }} preceding and current row
+    )
 
 ),
 
@@ -253,15 +344,20 @@ typical as (
 
     select
         typed.*,
-        median(typed.value) over typical_frame as typical_median,
-        avg(typed.value) over typical_frame as typical_mean,
-        quantile_cont(typed.value, 0.25) over typical_frame as typical_p25,
-        quantile_cont(typed.value, 0.75) over typical_frame as typical_p75,
-        count(typed.value) over typical_frame as typical_days,
-        min(typed.service_date) over typical_frame as typical_first_date,
-        max(typed.service_date) over typical_frame as typical_last_date
+        baseline.typical_median,
+        baseline.typical_mean,
+        baseline.typical_p25,
+        baseline.typical_p75,
+        baseline.typical_days,
+        baseline.typical_first_date,
+        baseline.typical_last_date
     from typed
-    window typical_frame as ({{ typical_window('typed.scope_id, typed.measure, typed.day_type') }})
+    asof left join baseline
+        on
+            typed.scope_id = baseline.scope_id
+            and typed.measure = baseline.measure
+            and typed.day_type = baseline.day_type
+            and typed.service_date > baseline.service_date
 
 )
 
@@ -271,12 +367,15 @@ select
     cast(service_date as date) as service_date,
     cast(date_key as integer) as date_key,
     cast(day_type as varchar) as day_type,
+    cast(is_planned_change as boolean) as is_planned_change,
+    cast(planned_change_lines as bigint) as planned_change_lines,
+    cast(planned_change_label as varchar) as planned_change_label,
     cast(measure as varchar) as measure,
     cast(unit as varchar) as unit,
     cast(value as double) as value,
     cast(numerator as double) as numerator,
     cast(denominator as double) as denominator,
-    cast(typical_days as bigint) as typical_days,
+    cast(coalesce(typical_days, 0) as bigint) as typical_days,
     cast(typical_first_date as date) as typical_first_date,
     cast(typical_last_date as date) as typical_last_date,
     cast(typical_median as double) as typical_median,
