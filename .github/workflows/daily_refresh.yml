@@ -74,7 +74,8 @@ jobs:
         run: dbt source freshness --profiles-dir .
 
       # refresh_reference re-reads the GTFS archive and the Open Data CSVs into their staging
-      # tables once a day; between runs they are kept in the cached warehouse.
+      # tables once a day; between runs they are kept in the cached warehouse. The Open Data
+      # CSVs are first downloaded with retries (scripts/mirror_open_data.sh).
       - name: dbt build
         id: build
         continue-on-error: true
@@ -86,7 +87,7 @@ jobs:
             echo "No cached warehouse; building the default window"
             echo "fresh=true" >> "$GITHUB_OUTPUT"
           fi
-          dbt build --profiles-dir . --vars '{refresh_reference: true}'
+          dbt build --profiles-dir . --vars "$(scripts/mirror_open_data.sh warehouse/mirror)"
 
       # New warehouse only: drop the snapshot and replay each GTFS version in date order, so
       # dbt_valid_from / dbt_valid_to carry the real GTFS dates.

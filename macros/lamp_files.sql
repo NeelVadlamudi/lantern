@@ -75,8 +75,14 @@
 {#- Keep a reference table between builds; re-read its remote source only on the first build,
     on --full-refresh, or with --vars '{refresh_reference: true}'. Used as the pre_hook of the
     GTFS and Open Data staging tables, which are too large to download on every build. -#}
+{# keep_reference_tables lists staging models to leave as cached even when refresh_reference
+   is set (the daily run uses it when an Open Data download failed). #}
+{% macro refresh_this_reference() %}
+    {{ return(var('refresh_reference', false) and this.name not in var('keep_reference_tables', [])) }}
+{% endmacro %}
+
 {% macro clear_reference_table() %}
-    {%- if is_incremental() and var('refresh_reference', false) -%}
+    {%- if is_incremental() and refresh_this_reference() -%}
         delete from {{ this }}
     {%- else -%}
         select 1
@@ -84,5 +90,5 @@
 {% endmacro %}
 
 {% macro keep_reference_table() %}
-    {{ return(is_incremental() and not var('refresh_reference', false)) }}
+    {{ return(is_incremental() and not refresh_this_reference()) }}
 {% endmacro %}
