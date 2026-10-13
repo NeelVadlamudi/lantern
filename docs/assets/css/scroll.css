@@ -167,6 +167,14 @@ body.layout-scroll.show-filters .filterstrip { transform: none; }
   .layout-scroll .filterstrip .chips { flex-wrap: nowrap; }
   .layout-scroll .filterstrip .tod-strip { overflow-x: auto; scrollbar-width: none; }
   .layout-scroll .ft-note { left: 16px; right: 16px; }
+  /* phones: statement gets the page's side padding (the later .page rule resets .page padding to the insets) */
+  .layout-scroll .statement { margin: 64px 0 72px; padding-left: max(16px, env(safe-area-inset-left)); padding-right: max(16px, env(safe-area-inset-right)); }
+  /* phones: filter rows are clear sideways-scroll rows; items keep their size (no squeezed labels), fade at the far edge */
+  .layout-scroll .fs-row > *, .layout-scroll .filterstrip .chips > *, .layout-scroll .filterstrip .seg > * { flex: none; }
+  .layout-scroll .filterstrip .tod-seg { flex: none !important; } /* beats the inline hour-span flex: label width, not squeezed */
+  .layout-scroll .fs-row, .layout-scroll .filterstrip .tod-strip { scroll-padding-inline: 12px; scroll-snap-type: x proximity; padding-right: 28px;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); mask-image: linear-gradient(to right, #000 calc(100% - 28px), transparent); }
+  .layout-scroll .fs-row > *, .layout-scroll .filterstrip .tod-seg { scroll-snap-align: start; }
 }
 .layout-scroll .filterstrip .seg button, .layout-scroll .filterstrip .date-chip { white-space: nowrap; }
 .layout-scroll .st-sub { margin-top: 12px; font-size: clamp(17px, 1.5vw, 21px); line-height: 1.5; color: var(--ink); text-wrap: pretty; }
