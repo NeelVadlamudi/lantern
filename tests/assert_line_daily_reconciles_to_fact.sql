@@ -5,6 +5,8 @@ with fact as (
         count(*) as events,
         count(distinct trip_key) as trips
     from {{ ref('fct_trip_stop_events') }}
+    -- the facts keep dates before the reporting window (dim_dates); the marts do not
+    where service_date >= (select min(date_day) from {{ ref('dim_dates') }})
     group by service_date
 ),
 

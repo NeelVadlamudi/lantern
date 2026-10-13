@@ -51,6 +51,8 @@ vars:
 
   # Loading (all sources are read in place by DuckDB; see models/staging/_sources.yml)
   use_sample: false            # true = read the committed sample in data/sample/ (offline, CI)
+  typical_min_days: 3          # fewer clean comparable earlier days: typical values null (typical_is_thin)
+  reporting_window_days: 90    # marts and exports: the last N calendar dates ending on the latest loaded date
   lamp_window_days: 90         # full refresh: this many complete service dates, ending yesterday
   # lamp_start_date / lamp_end_date (YYYY-MM-DD): optional fixed window, e.g.
   #   --vars '{lamp_start_date: 2026-07-09, lamp_end_date: 2026-10-06}'

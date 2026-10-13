@@ -376,12 +376,16 @@ select
     cast(numerator as double) as numerator,
     cast(denominator as double) as denominator,
     cast(coalesce(typical_days, 0) as bigint) as typical_days,
+    -- typical guard: fewer than var('typical_min_days') clean comparable earlier days is too thin
+    -- for a typical value; the typical values and differences are then null
+    cast(coalesce(typical_days, 0) as bigint) as typical_days_n,
+    cast(coalesce(typical_days, 0) < {{ var('typical_min_days') }} as boolean) as typical_is_thin,
     cast(typical_first_date as date) as typical_first_date,
     cast(typical_last_date as date) as typical_last_date,
-    cast(typical_median as double) as typical_median,
-    cast(typical_mean as double) as typical_mean,
-    cast(typical_p25 as double) as typical_p25,
-    cast(typical_p75 as double) as typical_p75,
-    cast(value - typical_median as double) as diff_vs_median,
-    cast(value - typical_mean as double) as diff_vs_mean
+    cast(case when not (coalesce(typical_days, 0) < {{ var('typical_min_days') }}) then typical_median end as double) as typical_median,
+    cast(case when not (coalesce(typical_days, 0) < {{ var('typical_min_days') }}) then typical_mean end as double) as typical_mean,
+    cast(case when not (coalesce(typical_days, 0) < {{ var('typical_min_days') }}) then typical_p25 end as double) as typical_p25,
+    cast(case when not (coalesce(typical_days, 0) < {{ var('typical_min_days') }}) then typical_p75 end as double) as typical_p75,
+    cast(case when not (coalesce(typical_days, 0) < {{ var('typical_min_days') }}) then value - typical_median end as double) as diff_vs_median,
+    cast(case when not (coalesce(typical_days, 0) < {{ var('typical_min_days') }}) then value - typical_mean end as double) as diff_vs_mean
 from typical

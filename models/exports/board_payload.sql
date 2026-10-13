@@ -1080,6 +1080,8 @@ latest_measures as (
                 'numerator', metrics.numerator,
                 'denominator', metrics.denominator,
                 'typical_days', metrics.typical_days,
+                'typical_days_n', metrics.typical_days_n,
+                'typical_is_thin', metrics.typical_is_thin,
                 'typical_first_date', strftime(metrics.typical_first_date, '%Y-%m-%d'),
                 'typical_last_date', strftime(metrics.typical_last_date, '%Y-%m-%d'),
                 'typical_median', metrics.typical_median,
@@ -1097,6 +1099,7 @@ latest_measures as (
         max(metrics.denominator) filter (where metrics.measure = 'late_trip_share') as trips_compared,
         max(metrics.typical_median) filter (where metrics.measure = 'late_trip_share') as typical_late_share,
         max(metrics.typical_days) filter (where metrics.measure = 'late_trip_share') as typical_days,
+        bool_or(metrics.typical_is_thin) filter (where metrics.measure = 'late_trip_share') as typical_is_thin,
         max(metrics.value) filter (where metrics.measure = 'completeness_share') as completeness_share,
         bool_or(metrics.is_planned_change) as is_planned_change,
         any_value(metrics.planned_change_label) as planned_change_label
@@ -1164,6 +1167,8 @@ latest_day as (
             'typical_rule', 'Typical = median (and mean) of the same measure on the most recent'
             || ' {{ var("typical_days") }} earlier service dates of the same day type with data for'
             || ' that line and no planned service change; typical range = p25 to p75 of those days;'
+            || ' with fewer than {{ var("typical_min_days") }} such days the typical values are left out'
+            || ' (typical_is_thin);'
             || ' diff = the day''s value minus the typical value.',
             'completeness_rule', 'completeness_share = scheduled trips with a compared run under their own'
             || ' trip id / trips in the GTFS schedule for the date (at most 1); is_low_completeness when below'
@@ -1182,6 +1187,20 @@ latest_day as (
                 -- with no earlier day of the same type (a holiday early in the window) the typical
                 -- value is null, so the sentence says there is nothing to compare with
                 'comparison', case
+                    when measures.typical_days > 0 and measures.typical_is_thin
+                        then format(
+                                '{:.1f}% of train runs took more than {} minutes over their scheduled run'
+                                || ' time ({:,} of {:,}); not enough comparable days for a typical value'
+                                || ' ({} earlier {} without planned changes; at least {} needed).',
+                                100 * measures.late_share,
+                                {{ var('late_trip_seconds') }} // 60,
+                                cast(measures.late_trips as bigint),
+                                cast(measures.trips_compared as bigint),
+                                measures.typical_days,
+                                case when measures.typical_days = 1 then latest_date.day_type
+                                    else latest_date.day_type || 's' end,
+                                {{ var('typical_min_days') }}
+                            )
                     when measures.typical_days > 0
                         then format(
                                 '{:.1f}% of train runs took more than {} minutes over their scheduled run'
@@ -1211,6 +1230,8 @@ latest_day as (
                 'is_low_completeness', coalesce(
                     measures.completeness_share < {{ var('completeness_min_share') }}, false
                 ),
+                'typical_days_n', coalesce(measures.typical_days, 0),
+                'typical_is_thin', coalesce(measures.typical_is_thin, true),
                 'is_planned_change', coalesce(measures.is_planned_change, false),
                 'planned_change_label', measures.planned_change_label,
                 'measures', measures.measures,

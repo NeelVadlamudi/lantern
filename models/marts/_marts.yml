@@ -362,6 +362,9 @@ models:
         data_tests:
           - not_null
           - relationships:
+              config:
+                # facts keep loaded dates older than the reporting window (dim_dates)
+                where: "date_key >= (select min(date_key) from {{ target.database }}.marts.dim_dates)"
               arguments:
                 to: ref('dim_dates')
                 field: date_key
@@ -561,6 +564,9 @@ models:
         data_tests:
           - not_null
           - relationships:
+              config:
+                # facts keep loaded dates older than the reporting window (dim_dates)
+                where: "date_key >= (select min(date_key) from {{ target.database }}.marts.dim_dates)"
               arguments:
                 to: ref('dim_dates')
                 field: date_key

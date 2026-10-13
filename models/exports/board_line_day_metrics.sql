@@ -29,6 +29,8 @@ select
     metrics.numerator,
     metrics.denominator,
     metrics.typical_days,
+    metrics.typical_days_n,
+    metrics.typical_is_thin,
     metrics.typical_first_date,
     metrics.typical_last_date,
     metrics.typical_median,

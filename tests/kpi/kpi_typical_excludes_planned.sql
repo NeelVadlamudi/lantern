@@ -2,7 +2,7 @@
 -- system scope in mart_line_day_metrics, the late-share typical median is recomputed from the
 -- daily rows: the median of the latest var('typical_days') earlier dates of the same day type
 -- without a planned change and with a value. Planned days stay in the day view, labelled.
--- Tolerance 1e-12.
+-- With fewer than var('typical_min_days') such days the typical median is null. Tolerance 1e-12.
 with days as (
     select
         scope_id,
@@ -26,7 +26,8 @@ recomputed as (
         days.typical_days,
         days.typical_median,
         (
-            select median(earlier.value)
+            -- fewer than var('typical_min_days') such days: typical values are null (thin)
+            select case when count(earlier.value) >= {{ var('typical_min_days') }} then median(earlier.value) end
             from (
                 select prior_day.value
                 from days as prior_day

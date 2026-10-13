@@ -13,6 +13,7 @@ with scheduled_compared as (
     inner join {{ ref('fct_trips') }} as trips
         on scheduled.service_date = trips.service_date and scheduled.trip_id = trips.trip_id
     where trips.compared_segments > 0
+        and trips.service_date >= (select min(date_day) from {{ ref('dim_dates') }})
     group by scheduled.route_id, scheduled.service_date
 ),
 
@@ -23,6 +24,7 @@ runs as (
         count(*) filter (where compared_segments > 0 and is_matched_trip) as matched_runs_compared,
         count(*) filter (where compared_segments > 0 and not is_matched_trip) as unmatched_runs_compared
     from {{ ref('fct_trips') }}
+    where service_date >= (select min(date_day) from {{ ref('dim_dates') }})
     group by route_id, service_date
 ),
 

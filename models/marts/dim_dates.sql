@@ -1,9 +1,15 @@
--- Grain: one row per calendar date between the first and last loaded service date.
+-- Grain: one row per calendar date in the reporting window: the last var('reporting_window_days')
+-- (90) calendar dates ending on the latest loaded service date, or from the first loaded date
+-- when less is loaded. The facts keep older loaded dates; marts and exports join to this table
+-- (or filter on it) so the window rolls forward with each daily build and never grows.
 
 with bounds as (
 
     select
-        min(service_date) as first_date,
+        greatest(
+            min(service_date),
+            max(service_date) - {{ var('reporting_window_days') - 1 }}
+        ) as first_date,
         max(service_date) as last_date
     from {{ ref('stg_lamp__subway_trip_stops') }}
 

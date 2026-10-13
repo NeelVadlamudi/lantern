@@ -57,6 +57,14 @@ models:
       - name: typical_days
         data_type: bigint
         description: 'Earlier service dates of the same day type, without a planned change, used for the typical value (up to var typical_days; 0 when none).'
+      - name: typical_days_n
+        data_type: bigint
+        description: 'Clean comparable earlier days (same day type, no planned change) behind the typical value; same count as typical_days.'
+        data_tests: [not_null]
+      - name: typical_is_thin
+        data_type: boolean
+        description: 'True when typical_days_n is below var typical_min_days (3): typical median, mean, p25, p75 and the differences are null.'
+        data_tests: [not_null]
       - name: typical_first_date
         data_type: date
         description: 'First date used for the typical value.'

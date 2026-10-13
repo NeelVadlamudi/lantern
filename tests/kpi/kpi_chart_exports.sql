@@ -15,12 +15,14 @@ expected as (
         count(*) as n
     from {{ ref('fct_trips') }}
     where compared_segments > 0 and is_matched_trip
+        and service_date >= (select min(date_day) from {{ ref('dim_dates') }})
     union all
     select
         'run' as kind,
         count(*) as n
     from {{ ref('int_train_runs') }}
     where run_comparison_status = 'compared'
+        and service_date >= (select min(date_day) from {{ ref('dim_dates') }})
 ),
 
 shares as (
