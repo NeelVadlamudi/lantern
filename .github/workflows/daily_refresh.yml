@@ -1,7 +1,7 @@
 name: "Lantern: daily refresh"
 
 # Reads the newest MBTA service date, rebuilds, and publishes docs/ and out/ to GitHub Pages.
-# docs/ becomes the site root (board at ./index.html, dbt docs at ./dbt/index.html), out/ is ./out/.
+# docs/ becomes the site root (board at ./index.html, dbt docs at ./dbt/index.html), out/ is ./data/.
 # Nothing is committed back to the repository: the site is deployed as a Pages artifact.
 # Only dbt runs here: DuckDB reads the MBTA files in place (httpfs), and the on-run-end hook
 # writes out/board_data.json. The DuckDB file is carried between runs with actions/cache, so
@@ -12,9 +12,9 @@ name: "Lantern: daily refresh"
 # Last good version: the site is published only from a build whose models and tests all passed
 # and whose files pass the leak scan. A passing run saves its site to the cache (lantern-site-*).
 # When the build or a test fails, that last good site is restored and republished unchanged
-# except for out/health.json, so the previous data stays live and the failure is on record.
+# except for data/health.json, so the previous data stays live and the failure is on record.
 # With no saved site (first run), nothing is published. The job still ends as failed.
-# out/health.json is the public run log: one line per run (date, pass or fail, row counts),
+# data/health.json is the public run log: one line per run (date, pass or fail, row counts),
 # the last 30 runs, newest first.
 
 on:
@@ -140,15 +140,15 @@ jobs:
           cp target_docs/static_index.html docs/dbt/index.html
 
       # Site layout: docs/ is the Pages root (the board is docs/index.html, dbt docs at
-      # ./dbt/index.html) and the exported data is served at ./out/.
+      # ./dbt/index.html) and the exported data is served at ./data/ (the page reads it there).
       - name: Assemble site (this run)
         if: steps.outcome.outputs.good == 'true'
         run: |
           mkdir -p _site
           cp -r docs/. _site/
           rm -f _site/.gitkeep
-          cp -r out _site/out
-          rm -f _site/out/.gitkeep _site/out/health_run.json
+          cp -r out _site/data
+          rm -f _site/data/.gitkeep _site/data/health_run.json
           if [ ! -f _site/index.html ]; then cp site/index.html _site/index.html; fi
 
       - name: Restore last good site
@@ -171,18 +171,18 @@ jobs:
             jq -n --arg d "$(TZ=America/New_York date +%F)" \
               '{run_date: $d, status: "fail", nodes_failed: null, note: "dbt did not record a run"}' > out/health_run.json
           fi
-          curl -fsS --max-time 30 "${{ steps.pages.outputs.base_url }}/out/health.json" -o previous_health.json \
+          curl -fsS --max-time 30 "${{ steps.pages.outputs.base_url }}/data/health.json" -o previous_health.json \
             && jq -e '.runs | type == "array"' previous_health.json > /dev/null \
             || echo '{"runs": []}' > previous_health.json
-          if [ -d _site/out ]; then
+          if [ -d _site/data ]; then
             jq -s --arg published "${{ steps.outcome.outputs.good == 'true' && 'this run' || 'last good run kept' }}" \
               '{runs: ([.[1] + {published: $published}] + .[0].runs)[:30]}' \
-              previous_health.json out/health_run.json > _site/out/health.json
+              previous_health.json out/health_run.json > _site/data/health.json
           fi
 
       - name: Leak scan (site)
         id: site_scan
-        if: hashFiles('_site/out/board_data.json') != ''
+        if: hashFiles('_site/data/board_data.json') != ''
         run: bash scripts/leak_scan.sh _site
 
       - name: Save site as last good

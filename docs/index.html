@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; worker-src 'self' blob:; connect-src 'self' https://api-v3.mbta.com https://tiles.openfreemap.org; img-src 'self' data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self'; manifest-src 'self'; base-uri 'none'; form-action 'none'; object-src 'none'">
+  <meta name="referrer" content="no-referrer">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>Lantern</title>
+  <meta name="description" content="Lantern: where the T runs late, from recorded train runs. Built with dbt Core and DuckDB on public MBTA data.">
+  <meta name="theme-color" content="#F2EAD8">
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preload" href="assets/fonts/ebgaramond-wght.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="assets/vendor/maplibre-gl.css">
+  <link rel="stylesheet" href="assets/css/fonts.css">
+  <link rel="stylesheet" href="assets/css/frost.css">
+  <link rel="stylesheet" href="assets/css/board.css">
+  <link rel="stylesheet" href="assets/css/scroll.css">
+</head>
+<body class="layout-scroll">
+  <header class="pagehead">
+    <div class="ph-left"><span class="ph-title cartouche"><span class="wordmark" data-bind="title">Lantern</span></span></div>
+    <div class="ph-centre" aria-hidden="true">
+      <svg class="ph-mark" viewBox="-50 -50 100 100"><circle r="30" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M0 -46 L6 -6 L0 0 L-6 -6 Z" fill="currentColor"/><path d="M0 46 L6 6 L0 0 L-6 6 Z" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M46 0 L6 6 L0 0 L6 -6 Z M-46 0 L-6 6 L0 0 L-6 -6 Z" fill="none" stroke="currentColor" stroke-width="1.4"/></svg>
+      <span class="ph-sub" data-bind="subtitle">Where the T runs late, from recorded train runs.</span>
+    </div>
+    <div class="ph-right"><a class="ph-link" id="open-build" href="#built">How it's built</a></div>
+    <p class="ph-fresh"><span class="fresh is-stale" id="fresh" role="status" aria-live="polite"><span class="fresh-dot" aria-hidden="true"></span><span id="fresh-text">Live · connecting</span></span>
+      <span class="latest" id="latest" hidden></span></p>
+  </header>
+
+  <main class="page">
+    <!-- 1. statement -->
+    <section class="statement" id="statement" aria-live="polite">
+      <p class="st-text" id="st-text">Waiting for the checked figures.</p>
+      <p class="st-sub" id="st-sub"></p>
+      <p class="st-cap" id="st-cap"></p>
+      <div class="empty" id="rail-empty">
+        <p class="empty-title">Waiting for the first dbt build</p>
+        <p class="empty-copy">The figures, map shading and lists fill in once dbt writes its files.</p>
+      </div>
+    </section>
+
+    <!-- 1b. first-screen question: was my line worse than usual, and where? -->
+    <section class="myline" id="myline" aria-labelledby="myline-q">
+      <h2 class="myline-q" id="myline-q">Was my line worse than usual, and where?</h2>
+      <div class="myline-pick" id="myline-pick" role="group" aria-label="Pick your line"></div>
+      <p class="myline-a" id="myline-a" aria-live="polite">Pick a line.</p>
+      <p class="myline-w" id="myline-w"></p>
+    </section>
+
+    <!-- 2. map plate -->
+    <section class="plate map-plate" id="map-plate" aria-label="Map">
+      <div class="map-frame">
+        <div id="map" class="map" aria-label="Map of the MBTA subway network with live train positions" role="region"></div>
+        <p class="map-hint" id="map-hint">Click to zoom</p>
+  <svg class="compass plate-compass" id="compass" viewBox="-50 -50 100 100" aria-hidden="true">
+    <circle r="30" fill="none" stroke="currentColor" stroke-width="0.8" opacity="0.55"/>
+    <circle r="26" fill="none" stroke="currentColor" stroke-width="0.4" opacity="0.45"/>
+    <path d="M0 -44 L5 -5 L0 0 L-5 -5 Z" fill="currentColor"/>
+    <path d="M0 44 L5 5 L0 0 L-5 5 Z" fill="none" stroke="currentColor" stroke-width="0.8"/>
+    <path d="M44 0 L5 5 L0 0 L5 -5 Z" fill="none" stroke="currentColor" stroke-width="0.8"/>
+    <path d="M-44 0 L-5 5 L0 0 L-5 -5 Z" fill="none" stroke="currentColor" stroke-width="0.8"/>
+    <path d="M22 -22 L3 -3 M-22 -22 L-3 -3 M22 22 L3 3 M-22 22 L-3 3" stroke="currentColor" stroke-width="0.6" opacity="0.6"/>
+    <text x="0" y="-46" text-anchor="middle" font-size="11" fill="currentColor">N</text>
+  </svg>
+  <div class="view-toggle" id="view-toggle" role="group" aria-label="Trains shown on the map" hidden>
+    <button type="button" data-view="subway" aria-pressed="true">Subway</button>
+    <button type="button" data-view="cr" aria-pressed="false"><span class="lab-long">Subway + Commuter Rail</span><span class="lab-short">+ Commuter Rail</span></button>
+    <span class="vt-sep" aria-hidden="true"></span>
+    <button type="button" id="ft-toggle" class="ft-toggle" aria-pressed="false" title="Freedom Trail sites and their nearest T stops"><svg viewBox="-6 -6 12 12" aria-hidden="true"><path d="M0-5 1.2-1.6 4.8-1.5 1.9.7 2.9 4.1 0 2.1-2.9 4.1-1.9.7-4.8-1.5-1.2-1.6Z" fill="currentColor"/></svg><span class="lab-long">Freedom Trail</span><span class="lab-short">Trail</span></button>
+  </div>
+      </div>
+      <aside class="drawer" id="drawer" aria-label="Details" data-mode="detail">
+        <div class="drawer-head">
+          <h2 class="card-title" id="drawer-title">Details</h2>
+          <button class="drawer-close" id="drawer-close" type="button" aria-label="Close details">Close</button>
+        </div>
+        <section class="detail" id="detail" hidden></section>
+      </aside>
+      <div class="plate-cap legend" id="legend" hidden>
+      <ul class="legend-keys">
+        <li><i class="sw-line sw-top"></i><i class="sw-badge">1</i>Top 10 stretches · recorded train delay</li>
+        <li><i class="sw-line sw-ramp"></i>Other stretches, line colour</li>
+        <li><i class="sw sw-none"></i>Station without gate data</li>
+      </ul>
+      </div>
+      <p class="plate-cap">Plate I. The subway today: live trains in their line colours; hatched and sealed stretches lose the most recorded time.</p>
+    </section>
+
+    <!-- 3 + 4. insight plates (main number, cards 1-4, Top 10) -->
+    <div class="cards collage" id="cards" role="list" aria-label="Insights"></div>
+
+    <!-- All measures (folded) -->
+    <section class="plate more-plate">
+    <details class="more" id="more">
+      <summary class="mono">All measures</summary>
+      <div class="more-body">
+        <p class="scope mono" id="scope">No dbt build yet</p>
+      <article class="hero" id="hero" hidden>
+        <div class="hero-top">
+          <p class="hero-k" id="hero-k">Train delay per weekday</p>
+          <span class="est mono" title="Measured from every train run compared to its schedule">Measured · train runs</span>
+        </div>
+        <p class="hero-v" id="hero-v"><span class="num is-empty">—</span></p>
+        <p class="hero-s" id="hero-s"></p>
+        <div class="spark-wrap" id="hero-spark-wrap" hidden>
+          <svg class="spark" id="hero-spark" viewBox="0 0 240 34" preserveAspectRatio="none" role="img" aria-label="Measured train delay by day"></svg>
+          <p class="spark-k mono" id="hero-spark-k"></p>
+        </div>
+        <p class="rider-note mono" id="hero-note" hidden></p>
+      </article>
+
+      <article class="rider" id="rider" hidden>
+        <div class="hero-top">
+          <p class="rider-k" id="rider-k">Rider time lost per weekday</p>
+          <span class="est mono">Estimate</span> <span class="est mono est-model" title="Waiting time is modelled from gate entries and assumes riders arrive at random; it is not recorded">Modelled</span>
+        </div>
+        <p class="rider-v" id="rider-v"></p>
+        <div class="spark-wrap" id="spark-wrap" hidden>
+          <svg class="spark" id="spark" viewBox="0 0 240 34" preserveAspectRatio="none" role="img" aria-label="Rider time lost by week"></svg>
+          <p class="spark-k mono" id="spark-k"></p>
+        </div>
+        <p class="rider-s" id="rider-s"></p>
+        <p class="rider-note mono" id="rider-recon" hidden></p>
+        <p class="rider-note mono">Based on people entering stations, so shown only where gate counts exist. Assumes riders reach the platform at random times: the waiting part is modeled, not recorded.</p>
+      </article>
+      <div class="tabs" id="tabs" role="tablist" aria-label="Lists and measures" hidden>
+        <button type="button" role="tab" id="tab-top" data-tab="top" aria-controls="panel-top" aria-selected="false"><span class="lab-long">Top 10 stretches</span><span class="lab-short">Top 10</span></button>
+        <button type="button" role="tab" id="tab-worse" data-tab="worse" aria-controls="panel-worse" aria-selected="false">Getting worse</button>
+        <button type="button" role="tab" id="tab-measures" data-tab="measures" aria-controls="panel-measures" aria-selected="false">Measures</button>
+      </div>
+
+      <section class="panel" id="panel-top" role="tabpanel" aria-labelledby="tab-top" hidden></section>
+      <section class="panel" id="panel-worse" role="tabpanel" aria-labelledby="tab-worse" hidden></section>
+      <section class="panel" id="panel-measures" role="tabpanel" aria-labelledby="tab-measures" hidden>
+        <div class="tiles" id="tiles">
+          <article class="kpi" data-kpi="late" title="Train runs 5+ min over scheduled run time. Our measure; the MBTA's Excess Trip Time is per rider and not comparable.">
+            <p class="kpi-k">Late trips</p>
+            <p class="metric"><span class="num" data-v>—</span><span class="num-unit" data-u></span></p>
+            <p class="metric-caption">Train runs 5+ min over scheduled run time. Our measure; the MBTA's Excess Trip Time is per rider and not comparable.</p>
+            <p class="metric-count mono" data-count></p>
+          </article>
+          <article class="kpi" data-kpi="excess" data-tile="avg_trip_excess_seconds" title="Per train run, actual minus scheduled time over its compared stops, averaged over all compared runs. Negative means faster than scheduled.">
+            <p class="kpi-k">Extra time per run</p>
+            <p class="metric" data-metric>—</p>
+            <p class="metric-caption">Avg. time over (or under) scheduled run time, per run between compared stops.</p>
+          </article>
+          <article class="kpi" data-kpi="gaps" title="Share of train departures from stations where the gap since the previous train on the line, departure to departure, was more than 1.5 times the scheduled gap.">
+            <p class="kpi-k">Long gaps</p>
+            <p class="metric"><span class="num" data-v>—</span><span class="num-unit" data-u></span></p>
+            <p class="metric-caption">Train came more than 1.5× the scheduled headway after the one before.</p>
+          </article>
+          <article class="kpi" data-kpi="riders" title="Fare-gate entries on an average weekday made at a station, line and time of day while trains are running a long gap, estimated from the long-gap share. Entries, not people; gated stations only.">
+            <p class="kpi-k">Gate entries in long gaps</p>
+            <p class="metric"><span class="num" data-v>—</span><span class="num-unit" data-u></span></p>
+            <p class="metric-caption">Average weekday fare-gate entries. Entries, not riders.</p>
+          </article>
+        </div>
+        <div class="rail-actions">
+          <button class="pill" id="open-lines" type="button" aria-controls="drawer" aria-pressed="false">Compare lines</button>
+        </div>
+      </section>
+      </div>
+    </details>
+      <p class="plate-cap">Every measure for the dates, day and lines picked below.</p>
+    </section>
+
+    <!-- 5 + 6. charts and survey plates -->
+    <section class="charts-plates" id="charts" aria-label="Charts">
+      <p class="charts-xf" id="charts-xf" hidden></p>
+      <p class="charts-scope plate-cap" id="charts-scope"></p>
+      <div class="charts-body collage" id="charts-body"></div>
+    </section>
+
+    <!-- 7. Freedom Trail -->
+    <section class="plate ft-plate" id="ft-plate" aria-labelledby="ft-title">
+      <h2 class="plate-t" id="ft-title">The Freedom Trail by T</h2>
+      <div id="ft-list"><p class="ch-wait">Waiting for the checked data</p></div>
+      <p class="plate-cap">Sixteen sites in official order, each with its nearest T stop. Straight-line distances; walk times are estimates. Not part of any delay figure.</p>
+    </section>
+
+    <!-- 8. how it's built -->
+    <section class="plate build-plate" id="built" aria-labelledby="built-title">
+      <h2 class="plate-t" id="built-title">How it's built</h2>
+      <section class="build" id="build"><div id="build-body"></div></section>
+      <section class="methods" id="methods" aria-labelledby="methods-t"><h3 class="plate-t" id="methods-t">Methods: every definition and its source</h3><dl id="methods-list"><dd class="ch-wait">Waiting for the checked data</dd></dl></section>
+      <p class="plate-cap"><a id="docs-link" href="./dbt/index.html">dbt docs and lineage</a></p>
+    </section>
+
+    <footer class="pagefoot legal">
+      <p class="disclaimer">Public MBTA data. Live positions from the MBTA V3 API. Not affiliated with the MBTA.</p>
+      <a class="repo" id="repo-link" href="#repo">Source repository</a>
+    </footer>
+  </main>
+
+  <!-- the only sticky element: a slim filter strip, shown once the statement has scrolled away -->
+  <section class="filterstrip dock" id="filterstrip" aria-label="Filters: dates, day, time of day, line">
+    <div class="fs-row">
+      <button class="date-chip mono" id="date-chip" type="button" aria-expanded="false" aria-controls="dates" title="Service dates" disabled>Dates</button>
+      <div class="seg" id="day-types" role="group" aria-label="Day type"></div>
+      <div class="chips" id="line-chips" role="group" aria-label="Filter by line"></div>
+    </div>
+    <div class="dates" id="dates" hidden>
+      <label class="date-f"><span class="sr-only">From</span><input type="date" id="date-from" disabled aria-label="From date"></label>
+      <span class="date-sep mono" aria-hidden="true">to</span>
+      <label class="date-f"><span class="sr-only">To</span><input type="date" id="date-to" disabled aria-label="To date"></label>
+    </div>
+    <div class="tod" id="tod">
+      <div class="tod-strip" id="tod-strip" role="group" aria-label="Time of day"></div>
+      <p class="tod-empty" id="tod-empty">Time-of-day periods load with the charts.</p>
+    </div>
+  </section>
+
+  <p class="ft-note" id="ft-note" role="status" hidden></p>
+  <div class="tip glass" id="tip" role="tooltip" hidden></div>
+  <div class="grain" aria-hidden="true"></div>
+<noscript><p class="noscript">This board needs JavaScript to load the map and data.</p></noscript>
+
+  <script src="assets/vendor/maplibre-gl.js"></script>
+  <script type="module" src="assets/js/app.js"></script>
+</body>
+</html>

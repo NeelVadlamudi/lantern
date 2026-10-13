@@ -1,0 +1,284 @@
+/* "Boston, 1775" as one long scroll page: a loose collage of engraved plates on parchment.
+   Ordinary vertical scroll, no fixed chrome except the slim filter strip (shown after the
+   statement). Everything here is scoped to body.layout-scroll. */
+html:has(body.layout-scroll), body.layout-scroll { height: auto; overflow-x: hidden; overflow-y: auto; }
+body.layout-scroll { padding-bottom: calc(var(--dock-h, 90px) + 28px); background: var(--paper); }
+.layout-scroll .page { position: relative; z-index: 2; padding: 0 4vw; }
+.layout-scroll .grain { z-index: 3; opacity: 0.45; }
+
+/* header row: scrolls away */
+.layout-scroll .pagehead {
+  position: relative; z-index: 4; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  gap: 4px 16px; padding: 26px 4vw 0;
+}
+.layout-scroll .ph-left { justify-self: start; }
+.layout-scroll .ph-title.cartouche { padding: 2px 12px 3px; }
+.layout-scroll .ph-title .wordmark { font-size: 18px; }
+.layout-scroll .ph-centre { justify-self: center; display: flex; flex-direction: column; align-items: center; gap: 3px; color: var(--ink); }
+.layout-scroll .ph-mark { width: 26px; height: 26px; }
+.layout-scroll .ph-sub { font-size: 13.5px; font-style: italic; color: var(--text-dim); }
+.layout-scroll .ph-right { justify-self: end; }
+.layout-scroll .ph-link { font-size: 16px; color: var(--ink); text-decoration: none; border-bottom: 1px solid rgba(43, 33, 24, 0.45); }
+.layout-scroll .ph-link:hover { border-bottom-color: var(--ink); }
+.layout-scroll .ph-fresh { grid-column: 1 / -1; justify-self: center; display: flex; flex-wrap: wrap; justify-content: center; gap: 2px 14px; margin: 2px 0 0; font-size: 12.5px; color: var(--text-faint); }
+.layout-scroll .fresh { border: 0; padding: 0; font-size: 12.5px; gap: 6px; color: var(--text-faint); }
+.layout-scroll .latest { flex: none; font-size: 12.5px; }
+
+/* 1. statement */
+.layout-scroll .statement { width: 70%; margin: 120px 0 130px 9%; }
+.layout-scroll .st-text { font-size: clamp(24px, 2.45vw, 34px); line-height: 1.5; color: var(--ink); text-wrap: pretty; }
+.layout-scroll .st-text .num, .layout-scroll .st-text .num-unit { font-size: 1em; font-weight: 600; line-height: 1; }
+.layout-scroll .st-text .num-unit.word { font-size: 0.8em; }
+.layout-scroll .st-text .ins-dur { border-bottom-width: 1px; }
+.layout-scroll .st-cap { margin-top: 14px; display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: baseline; font-size: 13.5px; font-style: italic; color: var(--text-faint); }
+.layout-scroll .statement .empty { margin-top: 18px; max-width: 420px; }
+
+/* plates: engraved prints, a thin ink rule, an italic caption beneath */
+.layout-scroll .plate { position: relative; }
+.layout-scroll .plate-cap { margin: 9px 0 0; font-size: 13.5px; line-height: 1.4; font-style: italic; color: var(--text-faint); }
+.layout-scroll .plate-t { margin: 0 0 10px; font-size: 21px; font-weight: 500; color: var(--ink); }
+
+/* 2. map plate */
+.layout-scroll .map-plate { width: 76%; margin-left: 2%; }
+.layout-scroll .map-frame { position: relative; height: clamp(440px, 72vh, 760px); border: 1px solid rgba(43, 33, 24, 0.55); outline: 1px solid rgba(43, 33, 24, 0.25); outline-offset: 3px; background: var(--paper); }
+.layout-scroll .map { position: absolute; inset: 0; z-index: 0; }
+.layout-scroll .map-hint { position: absolute; z-index: 2; top: 10px; left: 12px; margin: 0; font-size: 13px; font-style: italic; color: var(--text-faint); background: rgba(242, 234, 216, 0.85); padding: 1px 6px; pointer-events: none; transition: opacity 0.2s ease; }
+.layout-scroll .map-frame.zoom-on .map-hint { opacity: 0; }
+.layout-scroll .plate-compass { position: absolute; z-index: 2; top: 12px; right: 14px; left: auto; bottom: auto; width: 56px; height: 56px; opacity: 0.7; display: block; }
+.layout-scroll .view-toggle { position: absolute; z-index: 3; left: 10px; right: auto; bottom: 10px; top: auto; background: rgba(248, 242, 228, 0.95); border: 1px solid var(--line); padding: 2px; }
+.layout-scroll .maplibregl-ctrl-bottom-right { bottom: 8px !important; right: 8px !important; }
+.layout-scroll .maplibregl-cooperative-gesture-screen { font-family: var(--font); background: rgba(242, 234, 216, 0.88); color: var(--ink); font-size: 18px; font-style: italic; }
+.layout-scroll .legend { margin-top: 10px; padding: 0; }
+.layout-scroll .legend-keys { font-size: 13.5px; }
+
+/* details panel: a print laid over the right edge of the map plate (it covers only map edge) */
+.layout-scroll .drawer {
+  position: absolute; z-index: 5; top: 44px; left: calc(100% - 56px); right: auto; bottom: auto;
+  width: min(340px, calc(22vw + 56px)); max-height: calc(clamp(440px, 72vh, 760px) - 70px);
+  background: rgba(250, 246, 236, 0.98); border: 1px solid rgba(43, 33, 24, 0.55); outline: 1px solid rgba(43, 33, 24, 0.25); outline-offset: -5px;
+  box-shadow: 0 2px 10px rgba(43, 33, 24, 0.1); border-radius: 2px; padding: 0 16px 16px;
+}
+.layout-scroll .drawer-head { background: linear-gradient(rgba(250, 246, 236, 0.99) 80%, rgba(250, 246, 236, 0)); }
+
+/* 3 + 4. insight plates: varied widths and positions, uneven whitespace */
+.layout-scroll .cards.collage { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: 2.6vw; row-gap: 0; align-items: start; margin-top: 70px; }
+.layout-scroll .icard {
+  background: rgba(250, 246, 236, 0.72); border: 1px solid rgba(43, 33, 24, 0.4); box-shadow: none; border-radius: 1px;
+  padding: 18px 20px 16px; margin-bottom: 44px;
+}
+.layout-scroll .icard[tabindex]:hover { border-color: rgba(43, 33, 24, 0.7); background: rgba(252, 249, 240, 0.9); }
+.layout-scroll .icard.is-on, .layout-scroll .icard.is-on[tabindex]:hover { border: 2px solid var(--ink); padding: 17px 19px 15px; }
+.layout-scroll .icard .plate-cap { position: absolute; top: 100%; left: 0; right: 0; margin-top: 8px; }
+.layout-scroll .icard[data-card="train_delay"] { grid-column: 2 / span 6; grid-row: 1; margin-top: 30px; }
+.layout-scroll .icard[data-card="train_delay"] .ins-a { font-size: 26px; line-height: 1.38; }
+.layout-scroll .icard[data-card="slow_or_unpredictable"] { grid-column: 9 / span 4; grid-row: 1; margin-top: 170px; }
+.layout-scroll .icard[data-card="even_gaps"] { grid-column: 1 / span 5; grid-row: 2; margin-top: 120px; }
+.layout-scroll .icard[data-card="extra_time"] { grid-column: 10 / span 3; grid-row: 2; margin-top: 60px; }
+.layout-scroll .icard[data-card="worst_spot"] { grid-column: 4 / span 6; grid-row: 3; margin-top: 110px; }
+.layout-scroll .icard[data-card="fix_first"] { grid-column: 6 / span 7; grid-row: 4; margin-top: 120px; }
+.layout-scroll .icard[data-card="fix_first"] .ins-q { font-size: 15px; }
+
+/* All measures, folded */
+.layout-scroll .more-plate { width: 44%; margin: 110px 5% 0 auto; padding: 14px 18px; border: 1px solid rgba(43, 33, 24, 0.3); background: rgba(250, 246, 236, 0.6); }
+.layout-scroll .more { border-top: 0; padding-top: 0; }
+
+/* 5 + 6. charts as plates */
+.layout-scroll .charts-plates { position: static; display: block; width: auto; max-height: none; overflow: visible; padding: 0; margin-top: 140px; background: none; border: 0; outline: 0; box-shadow: none; }
+.layout-scroll .charts-scope { width: 52%; margin: 0 0 30px 8%; order: 0; }
+.layout-scroll .charts-xf { position: sticky; top: 10px; z-index: 6; width: fit-content; max-width: 80%; margin: 0 0 20px 8%; background: rgba(250, 246, 236, 0.97); }
+.layout-scroll .charts-body.collage { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); column-gap: 2.6vw; align-items: start; }
+.layout-scroll .ch { position: relative; border: 1px solid rgba(43, 33, 24, 0.4); border-top-width: 1px; padding: 16px 18px 14px; background: rgba(250, 246, 236, 0.72); margin-bottom: 52px; }
+.layout-scroll .ch .plate-cap { position: absolute; top: 100%; left: 0; right: 0; margin-top: 8px; }
+.layout-scroll .charts-body.collage > .ch { grid-column: 1 / -1; min-width: 0; }
+.layout-scroll .charts-body.collage { grid-auto-flow: row dense; }
+.layout-scroll .ch[data-chart="daycmp"] { grid-column: 1 / span 7; }
+.layout-scroll .ch[data-chart="dayworst"] { grid-column: 8 / span 5; margin-top: 60px; }
+.layout-scroll .ch[data-chart="bunch"] { grid-column: 3 / span 6; margin-top: 60px; }
+.layout-scroll .ch[data-chart="cr"] { grid-column: 2 / span 8; margin-top: 90px; }
+.layout-scroll .ch[data-chart="error"] { grid-column: 1 / -1; }
+.layout-scroll .ch[data-chart="daily"] { grid-column: 1 / span 6; }
+.layout-scroll .ch[data-chart="heatmap"] { grid-column: 8 / span 5; margin-top: 120px; }
+.layout-scroll .ch[data-chart="histogram"] { grid-column: 3 / span 4; margin-top: 90px; }
+.layout-scroll .ch[data-chart="donut"] { grid-column: 9 / span 3; margin-top: 150px; }
+.layout-scroll .ch[data-chart="survey"] { grid-column: 2 / span 8; margin-top: 120px; }
+.layout-scroll .ch-svg { height: 30px; }
+.layout-scroll .ch-heat { height: auto; }
+.layout-scroll .ch-donut { height: 160px; }
+
+/* 7. Freedom Trail */
+.layout-scroll .ft-plate { width: 42%; margin: 140px 0 0 10%; }
+.layout-scroll .ft-list { margin: 0; padding: 0; list-style: none; border-top: 1px solid var(--line); }
+.layout-scroll .ft-row { width: 100%; display: grid; grid-template-columns: 2em minmax(0, 1fr); gap: 0 8px; padding: 6px 0; text-align: left; border-bottom: 1px solid var(--hair); }
+.layout-scroll .ft-n { font-weight: 600; color: var(--ink); }
+.layout-scroll .ft-name { color: var(--ink); font-size: 15px; }
+.layout-scroll .ft-stop { grid-column: 2; font-size: 13px; color: var(--text-dim); }
+.layout-scroll .ft-row:hover .ft-name { text-decoration: underline; }
+.layout-scroll .ft-note { position: fixed; z-index: 7; right: 4vw; left: auto; top: auto; bottom: calc(var(--dock-h, 90px) + 14px); }
+
+/* 8. how it's built + footer */
+.layout-scroll .build-plate { width: 62%; margin: 150px 4% 0 auto; padding: 18px 22px; border: 1px solid rgba(43, 33, 24, 0.4); background: rgba(250, 246, 236, 0.72); }
+.layout-scroll .build-plate .plate-cap a { color: var(--text-dim); }
+.layout-scroll .pagefoot { margin: 120px 0 30px; padding-top: 10px; border-top: 1px solid var(--line); display: flex; justify-content: space-between; gap: 16px; }
+
+/* the slim filter strip: the only sticky element, after the statement has scrolled away */
+.layout-scroll .filterstrip {
+  position: fixed; z-index: 20; left: 0; right: 0; bottom: 0; top: auto; width: auto;
+  padding: 6px 4vw 7px; gap: 5px; display: flex; flex-direction: column;
+  background: rgba(248, 242, 228, 0.97); border: 0; border-top: 1px solid rgba(43, 33, 24, 0.6); outline: 0;
+  box-shadow: 0 -1px 0 rgba(43, 33, 24, 0.18), 0 -6px 16px rgba(43, 33, 24, 0.06); border-radius: 0;
+  transform: translateY(105%); transition: transform 0.25s ease;
+}
+body.layout-scroll.show-filters .filterstrip { transform: none; }
+.layout-scroll .fs-row { display: flex; align-items: center; gap: 6px 12px; flex-wrap: wrap; }
+.layout-scroll .filterstrip .seg { margin-left: 0; }
+.layout-scroll .filterstrip .tod, .layout-scroll .filterstrip .tod-strip { height: 26px; min-height: 26px; }
+.layout-scroll .filterstrip .tod-seg { padding: 2px 6px 0; font-size: 12px; }
+.layout-scroll .filterstrip .tod-bar { height: 3px !important; }
+.layout-scroll .filterstrip .dates { max-width: 420px; }
+@media (prefers-reduced-motion: reduce) { .layout-scroll .filterstrip { transition: none; } }
+
+/* ---------- phones: one column, full-width plates with slight alternating indents, no overlaps */
+@media (width <= 860px) {
+  .layout-scroll .page { padding: 0 16px; }
+  .layout-scroll .pagehead { padding: 18px 16px 0; grid-template-columns: auto 1fr auto; }
+  .layout-scroll .ph-sub { display: none; }
+  .layout-scroll .ph-link { font-size: 14px; }
+  .layout-scroll .statement { width: auto; margin: 64px 4% 72px 0; }
+  .layout-scroll .st-text { font-size: 23px; line-height: 1.45; }
+  .layout-scroll .map-plate, .layout-scroll .more-plate, .layout-scroll .ft-plate, .layout-scroll .build-plate { width: auto; margin-left: 0; margin-right: 0; }
+  .layout-scroll .map-frame { height: 62vh; min-height: 380px; }
+  .layout-scroll .plate-compass { width: 40px; height: 40px; }
+  .layout-scroll .drawer { position: static; width: auto; max-height: none; margin-top: 14px; left: auto; }
+  .layout-scroll .cards.collage, .layout-scroll .charts-body.collage { display: flex; flex-direction: column; gap: 0; overflow: visible; margin: 64px 0 0; padding: 0; scroll-snap-type: none; }
+  .layout-scroll .icard, .layout-scroll .ch { flex: none; width: auto; margin: 0 0 76px; grid-column: auto; grid-row: auto; }
+  .layout-scroll .icard:nth-child(odd), .layout-scroll .ch:nth-child(odd) { margin-right: 5%; }
+  .layout-scroll .icard:nth-child(even), .layout-scroll .ch:nth-child(even) { margin-left: 5%; }
+  .layout-scroll .icard[data-card] { margin-top: 0; }
+  .layout-scroll .icard[data-card="train_delay"] .ins-a { font-size: 21px; }
+  .layout-scroll .ins-map { display: inline; }
+  .layout-scroll .more-plate { margin-top: 30px; margin-left: 5%; }
+  .layout-scroll .charts-plates { margin-top: 90px; }
+  .layout-scroll .charts-scope { width: auto; margin-left: 0; }
+  .layout-scroll .ch[data-chart] { margin-top: 0; }
+  .layout-scroll .ft-plate { margin-top: 80px; margin-right: 5%; }
+  .layout-scroll .build-plate { margin-top: 90px; margin-left: 5%; }
+  .layout-scroll .filterstrip { padding: 5px 10px 6px; }
+  .layout-scroll .fs-row { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .layout-scroll .filterstrip .chips { flex-wrap: nowrap; }
+  .layout-scroll .filterstrip .tod-strip { overflow-x: auto; scrollbar-width: none; }
+  .layout-scroll .ft-note { left: 16px; right: 16px; }
+}
+.layout-scroll .filterstrip .seg button, .layout-scroll .filterstrip .date-chip { white-space: nowrap; }
+.layout-scroll .st-sub { margin-top: 12px; font-size: clamp(17px, 1.5vw, 21px); line-height: 1.5; color: var(--ink); text-wrap: pretty; }
+.layout-scroll .st-sub .num, .layout-scroll .st-sub .num-unit { font-size: 1em; font-weight: 600; }
+
+/* v11: one-day plates, hourly ratings, donut key, Commuter Rail, survey n */
+.ch-tablewrap { overflow-x: auto; -webkit-overflow-scrolling: touch; }
+.ch-table { border-collapse: collapse; width: 100%; font-variant-numeric: lining-nums tabular-nums; font-size: 14px; }
+.ch-table th, .ch-table td { padding: 5px 8px; border-bottom: 1px solid rgba(43, 33, 24, 0.16); text-align: right; vertical-align: top; }
+.ch-table th:first-child { text-align: left; font-weight: 500; white-space: nowrap; }
+.ch-table tr:first-child th { font-variant-caps: all-small-caps; letter-spacing: 0.05em; color: var(--text-faint); font-weight: 500; }
+.ch-table th i, .dw-h i, .ch-lab i, .dn-key i { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 6px; vertical-align: 0; }
+.dc-table .dc-sys th, .dc-table .dc-sys td { border-bottom: 1.5px solid rgba(43, 33, 24, 0.45); font-weight: 600; }
+.dc .dc-v { display: block; color: var(--ink); }
+.dc .dc-t { display: block; font-size: 12px; font-style: italic; color: var(--text-faint); }
+.dc.is-worse { background: rgba(43, 33, 24, 0.12); }
+.dc.is-better { box-shadow: inset 0 0 0 1px rgba(43, 33, 24, 0.35); }
+.dw-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: 14px 22px; }
+.dw-h { font-size: 15px; font-weight: 600; margin: 0 0 4px; }
+.dw-k { font-size: 12px; font-variant-caps: all-small-caps; letter-spacing: 0.05em; color: var(--text-faint); margin: 6px 0 2px; }
+.dw-l { list-style: none; margin: 0; padding: 0; font-size: 14px; }
+.dw-l li { display: flex; gap: 6px; align-items: baseline; padding: 2px 0; }
+.dw-n { font-variant-numeric: lining-nums; color: var(--text-faint); min-width: 1em; }
+.dw-v { margin-left: auto; white-space: nowrap; font-variant-numeric: lining-nums tabular-nums; }
+.ch-cell.rate-worse { fill: #3A2C20; }
+.ch-cell.rate-about { fill: #CDBE9C; }
+.ch-cell.rate-better { fill: #F8F2E4; stroke: #6B5B48; stroke-width: 0.8; }
+.ch-cell.rate-none { fill: #EDE4CF; stroke: rgba(43, 33, 24, 0.25); stroke-dasharray: 2 2; stroke-width: 0.7; }
+.ch-rates span { display: inline-flex; align-items: center; gap: 5px; margin-right: 12px; }
+.ch-rates i { width: 14px; height: 10px; display: inline-block; }
+.ch-rates i.rate-worse { background: #3A2C20; } .ch-rates i.rate-about { background: #CDBE9C; }
+.ch-rates i.rate-better { background: #F8F2E4; box-shadow: inset 0 0 0 1px #6B5B48; } .ch-rates i.rate-none { background: #EDE4CF; outline: 1px dashed rgba(43,33,24,0.35); }
+.dn-wrap { display: flex; gap: 18px; align-items: center; flex-wrap: wrap; }
+.dn-wrap .ch-donut { width: 170px; height: 170px; flex: none; }
+.dn-key { list-style: none; margin: 0; padding: 0; font-size: 14px; flex: 1 1 180px; }
+.dn-key li { display: flex; align-items: baseline; padding: 2px 0; }
+.dn-v { margin-left: auto; font-variant-numeric: lining-nums tabular-nums; }
+.cr-fact { font-size: 17px; line-height: 1.45; margin: 0 0 8px; color: var(--ink); }
+.cr-fact .num { font-weight: 600; font-variant-numeric: lining-nums; }
+.ch-mark.is-open { opacity: 0.6; }
+.ch-n-r { font-size: 12px; color: var(--text-faint); white-space: nowrap; margin-left: 8px; font-variant-numeric: lining-nums; }
+.ch-row { display: flex; align-items: center; }
+
+/* v12: "liquid glass", matte parchment frost on the floating UI only (strip, tooltip, map controls, map captions) */
+:root { --glass-fill: rgba(248, 242, 228, 0.72); --glass-line: rgba(43, 33, 24, 0.22); --spring: cubic-bezier(0.22, 1.2, 0.36, 1); }
+.layout-scroll .filterstrip, .tip, .maplibregl-ctrl-group, .layout-scroll .view-toggle, .layout-scroll .map-hint, .layout-scroll .map-plate .legend {
+  background: var(--glass-fill) !important; border: 1px solid var(--glass-line) !important;
+  -webkit-backdrop-filter: blur(14px) saturate(1.08); backdrop-filter: blur(14px) saturate(1.08);
+}
+.layout-scroll .filterstrip { border-width: 1px 0 0 !important; transition: transform 0.42s var(--spring), opacity 0.3s ease; will-change: transform;
+  padding-bottom: max(7px, env(safe-area-inset-bottom)); padding-left: max(4vw, env(safe-area-inset-left)); padding-right: max(4vw, env(safe-area-inset-right)); }
+.tip { transition: opacity 0.16s ease, transform 0.22s var(--spring); }
+.tip[hidden] { display: block !important; opacity: 0; transform: translateY(4px) scale(0.98); pointer-events: none; visibility: hidden; }
+@supports not ((backdrop-filter: blur(1px)) or (-webkit-backdrop-filter: blur(1px))) {
+  .layout-scroll .filterstrip, .tip, .maplibregl-ctrl-group, .layout-scroll .view-toggle, .layout-scroll .map-hint, .layout-scroll .map-plate .legend { background: #F6EFDF !important; }
+}
+.no-glass .layout-scroll .filterstrip, body.no-glass .filterstrip, body.no-glass .tip, body.no-glass .maplibregl-ctrl-group, body.no-glass .view-toggle, body.no-glass .map-hint, body.no-glass .legend {
+  -webkit-backdrop-filter: none !important; backdrop-filter: none !important; background: #F6EFDF !important; }
+.layout-scroll .pagehead { padding-top: max(14px, env(safe-area-inset-top)); padding-left: max(4vw, env(safe-area-inset-left)); padding-right: max(4vw, env(safe-area-inset-right)); }
+.layout-scroll .page { padding-left: env(safe-area-inset-left); padding-right: env(safe-area-inset-right); }
+
+/* charts: smooth state change (opacity/transform only), clickable rows */
+.ch .ch-svg, .ch .ch-table, .ch .dw-grid { animation: ch-in 0.32s ease both; }
+@keyframes ch-in { from { opacity: 0; transform: translateY(3px); } to { opacity: 1; transform: none; } }
+.ch-mark, .ch-cell, .ch-slice { transition: opacity 0.2s ease; }
+.is-dim { opacity: 0.35; } .ch-cell.is-on { stroke: #2B2118; stroke-width: 1.6; }
+.xf-line { cursor: pointer; } .xf-line:hover, .xf-line:focus-visible { text-decoration: underline; text-underline-offset: 3px; }
+.xf-st { font: inherit; color: inherit; background: none; border: 0; padding: 0; text-align: left; cursor: pointer; text-decoration: underline dotted rgba(43,33,24,0.45); text-underline-offset: 3px; }
+.ch-slice.xf-line:focus-visible, .xf-line:focus-visible, .xf-st:focus-visible, .ch-tabs button:focus-visible { outline: 2px solid #2B2118; outline-offset: 2px; }
+canvas.maplibregl-canvas:focus-visible { outline: 2px solid #2B2118; outline-offset: -2px; }
+.ch-cell.rate-worse { stroke: #F2EAD8; stroke-width: 0.6; }
+
+/* touch: 44 px targets */
+@media (pointer: coarse) {
+  .layout-scroll .filterstrip button, .chips .chip, .seg button, .ch-tabs button, .view-toggle button, .maplibregl-ctrl-group button, .date-chip, .pill, .drawer-close, .tabs button, .xf-st, .ph-link { min-height: 44px; min-width: 44px; }
+  .layout-scroll .filterstrip .tod, .layout-scroll .filterstrip .tod-strip { height: 44px; min-height: 44px; }
+  .dw-l li { min-height: 44px; align-items: center; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ch .ch-svg, .ch .ch-table, .ch .dw-grid { animation: none; }
+  .layout-scroll .filterstrip, .tip, .ch-mark, .ch-cell, .ch-slice { transition: none !important; }
+}
+
+/* v12: first-screen question, data warning, methods, map-off, card links */
+.layout-scroll .myline { width: min(760px, 92vw); margin: 34px auto 0; padding: 16px 20px; border: 1px solid rgba(43, 33, 24, 0.35); background: rgba(250, 246, 236, 0.7); }
+.myline-q { font-size: clamp(20px, 2vw, 26px); font-weight: 500; margin: 0 0 10px; }
+.myline-pick { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.myline-a { font-size: 17px; line-height: 1.5; margin: 0; } .myline-w { font-size: 15px; font-style: italic; color: var(--text-dim); margin: 6px 0 0; }
+.data-warn { border: 1px solid #2B2118; padding: 6px 10px; font-size: 15px; margin-bottom: 12px; background: repeating-linear-gradient(135deg, transparent 0 6px, rgba(43,33,24,0.06) 6px 8px); }
+.methods { margin-top: 20px; } .methods dl { margin: 0; } .methods dt { font-weight: 600; margin-top: 10px; } .methods dd { margin: 2px 0 0; font-size: 14.5px; line-height: 1.45; }
+.methods-src { display: block; font-size: 12.5px; font-style: italic; color: var(--text-faint); }
+.ins-def { font-size: 13px; margin: 6px 0 0; } .ins-def a { color: var(--text-dim); }
+.map.map-off { display: flex; align-items: center; justify-content: center; min-height: 240px; background: #EFE6D2; }
+.map-off-note { max-width: 32em; text-align: center; font-size: 16px; padding: 20px; }
+@media (pointer: coarse) {
+  .dw-h.xf-line { min-height: 44px; display: flex; align-items: center; }
+  .seg-badge::after { content: ""; position: absolute; inset: -12px; }
+  .seg-badge { position: relative; }
+  .build-plate a, .pagefoot a, .methods a, .ins-def a, .ph-link, .maplibregl-ctrl-attrib-button { display: inline-flex; align-items: center; min-height: 44px; }
+  .myline-pick .chip { min-height: 44px; }
+}
+.ch-band { fill: var(--ink, #2b2118); opacity: .13; }
+[data-tip-s]:focus-visible { outline: 2px solid #2B2118; outline-offset: 1px; stroke: #2B2118; stroke-width: 1.5px; }
+.bg-l li { display: flex; flex-wrap: wrap; gap: 4px 14px; align-items: baseline; } .bg-k { min-width: 9em; } .bg-v b { font-weight: 600; }
+
+/* No text may push past its card: grid/flex children can shrink, long tokens wrap. */
+.card, .card *, .plate, .plate *, .chart, .chart * { min-width: 0; }
+.card p, .card li, .card dd, .card span, .plate p, .plate li, .plate span, .chart p { overflow-wrap: break-word; }
+.ins-v.ins-v-long { white-space: normal; }
+.ins-bar-k { white-space: normal; overflow-wrap: break-word; }
+#cards li, #cards li > * { min-width: 0; overflow-wrap: break-word; }
+.est { white-space: normal; overflow-wrap: break-word; max-width: 100%; display: inline-block; }
+#cards .ins-bar, #cards .ins-bars, #cards .ins-bar > * { min-width: 0; max-width: 100%; }
+#cards .ins-bar-v { min-width: 0; }
+body.layout-scroll.pin-filters { padding-bottom: var(--fs-h, 64px); }

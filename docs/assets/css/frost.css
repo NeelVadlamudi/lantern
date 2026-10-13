@@ -1,0 +1,120 @@
+/* "Boston, 1775": ink on parchment. One family (EB Garamond), lining tabular figures for numbers,
+   small caps for chips and labels. Data colours: official MBTA line colours only; every emphasis
+   (hotspots, selection, alerts) is drawn in ink. (File name kept from the earlier frost theme.) */
+:root {
+  --paper: #F2EAD8;          /* canvas / basemap land */
+  --card: #F8F2E4;           /* panels */
+  --ink: #2B2118;            /* iron-gall ink: text, rules, hotspots, selection */
+  --ink-muted: #6B5B48;      /* decorative rules and marks only (5.9:1, not used for text) */
+  --canvas: var(--paper);
+  --glass: rgba(248, 242, 228, 0.92);
+  --line: rgba(43, 33, 24, 0.25);
+  --hair: rgba(43, 33, 24, 0.16);
+  --text: #2B2118;           /* 14.1:1 on --card */
+  --text-dim: #4A3C2E;       /* 9.5:1 */
+  --text-faint: #54453A;     /* 8.2:1: every text colour stays above 7:1 */
+  --accent: var(--ink);      /* hotspots and alerts: ink (+ a symbol), never a hue */
+  --accent-glow: transparent;
+  --radius: 4px;
+  --radius-sm: 4px;
+  --gap: 12px;
+  --pad: 16px;
+  --font: "EB Garamond", "Garamond", "Baskerville", "Times New Roman", serif;
+  --font-ui: var(--font);
+  --font-num: var(--font);
+  --font-mono: var(--font);
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 0.17 0 0 0 0 0.13 0 0 0 0 0.09 0 0 0 0.09 0'/%3E%3C/filter%3E%3Crect width='180' height='180' filter='url(%23n)'/%3E%3C/svg%3E");
+  color-scheme: light;
+}
+*, *::before, *::after { box-sizing: border-box; }
+html, body {
+  background: var(--canvas);
+  color: var(--text);
+  margin: 0;
+  height: 100%;
+  font-family: var(--font);
+  font-weight: 400;
+  font-size: 15px;
+  letter-spacing: 0;
+  font-variant-numeric: lining-nums tabular-nums;
+  font-feature-settings: "lnum" 1, "tnum" 1, "kern" 1, "liga" 1;
+  font-kerning: normal;
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  overflow: hidden;
+}
+input, select, textarea, button { font-family: var(--font); font-feature-settings: "lnum" 1, "tnum" 1; }
+h1, h2, h3, p { margin: 0; font-weight: inherit; }
+button { font: inherit; color: inherit; background: none; border: 0; padding: 0; cursor: pointer; }
+a { color: inherit; }
+[hidden] { display: none !important; }
+:focus-visible { outline: 1.5px solid var(--ink); outline-offset: 3px; }
+
+/* Paper card: lighter parchment, double ink rule (1px + 1px with a 2px gap), small radius. */
+.glass {
+  background: var(--grain), var(--glass);
+  border: 1px solid rgba(43, 33, 24, 0.55);
+  outline: 1px solid rgba(43, 33, 24, 0.3);
+  outline-offset: -4px;
+  border-radius: var(--radius);
+  box-shadow: 0 1px 2px rgba(43, 33, 24, 0.08), 0 4px 14px rgba(43, 33, 24, 0.06);
+}
+
+/* Small caps label voice (replaces the old monospace chips). */
+.mono { font-family: var(--font); font-weight: 400; letter-spacing: 0.02em; font-variant-numeric: lining-nums tabular-nums; }
+.caps, .est, .pill, .seg button, .chip, .ins-q, .ins-when, .ins-map, .section-k, .detail-kicker, .tabs [role=tab],
+.view-toggle button, .drawer-close, .more > summary, .ptable th, .tip-k, .date-chip, .ins-bar-k, .ins-top-k, .ch-k {
+  font-variant-caps: all-small-caps; letter-spacing: 0.06em; font-variant-numeric: lining-nums tabular-nums;
+}
+.wordmark { font-size: 21px; font-weight: 500; letter-spacing: 0.01em; color: var(--ink); white-space: nowrap; }
+.subtitle { color: var(--text-dim); font-size: 14px; font-style: italic; }
+.card-title { color: var(--ink); font-size: 16px; font-weight: 500; letter-spacing: 0.01em; }
+
+.num {
+  font-family: var(--font);
+  font-feature-settings: "lnum" 1, "tnum" 1;
+  font-variant-numeric: lining-nums tabular-nums;
+  font-synthesis: none;
+  letter-spacing: 0;
+  color: var(--ink);
+  font-size: 36px;
+  line-height: 0.95;
+  font-weight: 500;
+}
+.num-unit {
+  font-family: var(--font);
+  color: var(--ink);
+  margin-left: 0.12em;
+  font-size: 21px;
+  font-weight: 500;
+}
+.num-unit.word { font-size: 15px; font-weight: 400; margin-left: 0.3em; color: var(--text-dim); }
+.id-num { font-family: var(--font); font-weight: 600; letter-spacing: 0.02em; color: var(--ink); font-variant-numeric: lining-nums tabular-nums; }
+
+.pill {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-family: var(--font); font-size: 14px;
+  color: var(--text-dim); text-decoration: none;
+  padding: 4px 11px; border-radius: 3px;
+  border: 1px solid var(--line); background: transparent;
+  white-space: nowrap;
+  transition: background 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+}
+.pill:hover { color: var(--ink); border-color: rgba(43, 33, 24, 0.6); }
+.pill[aria-pressed="true"] { color: var(--card); background: var(--ink); border-color: var(--ink); }
+.pill-sm { padding: 3px 10px; font-size: 13px; }
+
+@media (prefers-reduced-motion: reduce) {
+  * { scroll-behavior: auto !important; transition: none !important; }
+}
+
+/* Modelled badge (rider-minute figures): parchment chip, iron-gall ink, dashed edge = not recorded */
+.est-model { font-family: "EB Garamond", serif; background: var(--paper, #F3E9D2); color: var(--ink); border: 1px dashed currentColor; border-radius: 3px; padding: 0 5px; font-style: italic; white-space: nowrap; }
+/* Planned work (dbt: is_planned_change). Label only. */
+/* text-only separator before the planned-work tag (copy/paste, screen readers); the tag box is the visual one */
+.pw-sep { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.pw-tag { font-family: "EB Garamond", serif; font-style: italic; font-variant-caps: all-small-caps; letter-spacing: 0.04em; color: var(--ink); background: var(--paper); border: 1px solid currentColor; border-radius: 3px; padding: 0 4px; margin-left: 6px; white-space: nowrap; font-size: 0.85em; }
+.ch-planned { fill: var(--ink); opacity: 0.85; }
+.metric-count { margin: 2px 0 0; font-size: 0.85em; opacity: 0.8; }
+/* The measure definitions must show in full (no clamp): wording is fixed by the data owner. */
+.kpi .metric-caption { display: block; -webkit-line-clamp: unset; overflow: visible; }

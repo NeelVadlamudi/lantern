@@ -1,0 +1,8 @@
+/* One family for the whole board: EB Garamond (SIL OFL 1.1, see ../fonts/EBGaramond-OFL.txt).
+   Self-hosted variable woff2 (wght 400–800), Latin + Latin Extended-A, every OpenType feature
+   kept (lnum, tnum, smcp, c2sc, onum, pnum…). Map labels use SDF glyphs built from the same
+   font files (assets/glyphs/). */
+@font-face { font-family: "EB Garamond"; font-style: normal; font-weight: 400 800; font-display: swap;
+  src: url(../fonts/ebgaramond-wght.woff2) format("woff2-variations"), url(../fonts/ebgaramond-wght.woff2) format("woff2"); }
+@font-face { font-family: "EB Garamond"; font-style: italic; font-weight: 400 800; font-display: swap;
+  src: url(../fonts/ebgaramond-italic-wght.woff2) format("woff2-variations"), url(../fonts/ebgaramond-italic-wght.woff2) format("woff2"); }
