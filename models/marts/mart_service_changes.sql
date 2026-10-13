@@ -25,6 +25,10 @@
 -- from/to stations: of the alert's informed stops on this line, the first and last in the
 --   line's direction-0 stop order (int_line_stop_sequence); null when the alert names no stops
 --   (whole line) and for GTFS records.
+-- display_alert_id, display_effect_detail, alert_header: the text to show for the row. An alert
+--   row shows itself; a diversion timetable row shows the planned alert on the same route and
+--   service date that is not a station closure (shuttle or suspension first, then the lower alert
+--   id), or null when none.
 
 with dates as (
 
@@ -275,6 +279,52 @@ unioned as (
     union all
     select * from from_gtfs
 
+),
+
+-- the planned alert to show beside a diversion timetable: of the planned alerts on the same
+-- route and service date, a shuttle or suspension first, then the other effects, then the
+-- lower alert id
+day_alert as (
+
+    select
+        service_date,
+        route_id,
+        arg_min(
+            alert_id,
+            (case when effect_detail in ('SHUTTLE', 'SUSPENSION') then 0 else 1 end, alert_id)
+        ) as alert_id
+    from from_alerts
+    -- a station closure describes one stop, not the diversion, so it is not attached
+    where is_planned and header_text is not null and effect_detail <> 'STATION_CLOSURE'
+    group by service_date, route_id
+
+),
+
+described as (
+
+    select
+        unioned.*,
+        case
+            when unioned.source = 'alerts' then unioned.alert_id
+            else day_alert.alert_id
+        end as display_alert_id
+    from unioned
+    left join day_alert
+        on
+            unioned.source = 'gtfs_schedule'
+            and unioned.service_date = day_alert.service_date
+            and unioned.route_id = day_alert.route_id
+
+),
+
+display_text as (
+
+    select distinct
+        alert_id,
+        effect_detail,
+        header_text
+    from from_alerts
+
 )
 
 select
@@ -301,8 +351,12 @@ select
     cast(unioned.header_text as varchar) as header_text,
     cast(unioned.alert_created_at as timestamp) as alert_created_at,
     cast(unioned.alert_first_active_at as timestamp) as alert_first_active_at,
-    cast(unioned.service_id as varchar) as service_id
-from unioned
+    cast(unioned.service_id as varchar) as service_id,
+    cast(unioned.display_alert_id as bigint) as display_alert_id,
+    cast(display_text.effect_detail as varchar) as display_effect_detail,
+    cast(display_text.header_text as varchar) as alert_header
+from described as unioned
+left join display_text on unioned.display_alert_id = display_text.alert_id
 inner join {{ ref('dim_routes') }} as routes on unioned.route_id = routes.route_id
 left join {{ ref('dim_stations') }} as from_station on unioned.from_station_id = from_station.station_id
 left join {{ ref('dim_stations') }} as to_station on unioned.to_station_id = to_station.station_id

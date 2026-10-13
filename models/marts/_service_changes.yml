@@ -56,6 +56,12 @@ models:
       - name: affects_line_day
         description: 'True for DIV timetables and for SHUTTLE or SUSPENSION alerts naming at least two stations of the route; other records do not mark the line-day.'
         data_tests: [not_null]
+      - name: display_alert_id
+        description: 'Alert whose text describes the row: the alert itself, or for a DIV timetable the planned alert on the same route and date (shuttle or suspension first, then lower alert id).'
+      - name: display_effect_detail
+        description: 'effect_detail of display_alert_id.'
+      - name: alert_header
+        description: 'header_text of display_alert_id (null when no planned alert covers the date).'
       - name: from_station_id
         description: 'First named station of the change along the line (null when none named).'
       - name: from_station_name
@@ -207,3 +213,22 @@ models:
         description: 'sum(least(h, T)) / sum(h): the same with one rate everywhere.'
       - name: departure_share
         description: 'Share of departures with h <= T (no rider weighting).'
+
+  - name: mart_period_reliability_planned
+    description: >-
+      Reliability by time of day, split on planned service changes. Grain: one row per GTFS route,
+      day type, service period and is_planned_change over the loaded window. Same measures as
+      mart_period_reliability (macros/period_reliability.sql); each line-day takes its
+      is_planned_change from mart_planned_change_line_days, so rows with is_planned_change false
+      leave planned line-days out.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments:
+            combination_of_columns: [route_id, day_type, service_period_id, is_planned_change]
+    columns:
+      - name: line_period_key
+        description: 'Surrogate key: route_id, day_type, service_period_id, is_planned_change.'
+        data_tests: [unique, not_null]
+      - name: is_planned_change
+        description: 'True for the rows built from line-days with a planned service change.'
+        data_tests: [not_null]
