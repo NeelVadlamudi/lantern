@@ -99,9 +99,11 @@ prioritised as (
 
 duplicates as (
 
+    -- one kept partner per dropped event: the highest-priority candidate, ties broken by the
+    -- lower trip key and then the lower event key, so the pick never depends on row order
     select
         dropped.trip_stop_event_key as dropped_event_key,
-        arg_max(kept.trip_stop_event_key, kept.trip_class * 1000000 + kept.trip_event_count) as kept_event_key
+        kept.trip_stop_event_key as kept_event_key
     from prioritised as dropped
     inner join prioritised as kept
         on
@@ -120,7 +122,14 @@ duplicates as (
                     and dropped.event_trip_key > kept.event_trip_key
                 )
             )
-    group by dropped.trip_stop_event_key
+    qualify row_number() over (
+        partition by dropped.trip_stop_event_key
+        order by
+            kept.trip_class desc,
+            kept.trip_event_count desc,
+            kept.event_trip_key asc,
+            kept.trip_stop_event_key asc
+    ) = 1
 
 ),
 
