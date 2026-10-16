@@ -494,7 +494,11 @@ Paths can be changed with `MBTA_DUCKDB_PATH` (warehouse file) and `MBTA_OUT_DIR`
 
 ## Findings
 
-Window: 90 service dates, 2026-07-09 to 2026-10-06. 3,641,449 train-at-stop records,
+The live board is the current figure. It refreshes daily, uses the latest 90 service dates, and leaves out line-days with planned shutdowns or diversions. On 2026-10-15 it read 12.0% of train runs 5+ min over scheduled run time (19,108 of 158,795), and 11.8% with planned days included (20,030 of 170,424).
+
+The tables below are a fixed snapshot taken before the planned-work rule, counting every day and every compared run, so they do not match the board.
+
+Snapshot window: 90 service dates, 2026-07-09 to 2026-10-06. 3,641,449 train-at-stop records,
 352,266 train runs observed, 222,858 of them with at least one segment comparable to schedule.
 The tests in `tests/kpi/` recompute each number below from the fact tables on every build.
 
