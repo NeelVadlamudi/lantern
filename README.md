@@ -1,5 +1,7 @@
 # Lantern
 
+**Live board:** https://neelvadlamudi.github.io/lantern/ · **Portfolio:** https://neelvadlamudi.github.io/neelresume/
+
 Where the T runs late, from recorded train runs.
 
 Lantern is a dbt project on public MBTA data. The board is published at
