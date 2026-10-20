@@ -150,7 +150,6 @@ jobs:
           rm -f _site/.gitkeep
           cp -r out _site/data
           rm -f _site/data/.gitkeep _site/data/health_run.json
-          if [ ! -f _site/index.html ]; then cp site/index.html _site/index.html; fi
 
       - name: Restore last good site
         id: last_good
