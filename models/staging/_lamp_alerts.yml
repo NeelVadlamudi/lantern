@@ -7,6 +7,14 @@ models:
       performancedata.mbta.com LAMP_RT_ALERTS.parquet). Grain: one row per alert version, active
       period and informed entity. Kept: subway and light rail entities (route_type 0 or 1);
       accessibility alerts (elevators, escalators) are left out. Times are Boston local.
+      Python model: bytes in the text columns that are not valid UTF-8 become U+FFFD instead of
+      failing the build; no rows are dropped.
+    config:
+      # Same file as the lamp_rt_alerts source (external_location), read again by the fallback.
+      alerts_location: >-
+        {{ var('lamp_alerts_url', 'data/sample/lamp/LAMP_RT_ALERTS.parquet'
+        if var('use_sample', false)
+        else 'https://performancedata.mbta.com/lamp/tableau/alerts/LAMP_RT_ALERTS.parquet') }}
     columns:
       - name: alert_id
         description: 'MBTA alert id.'

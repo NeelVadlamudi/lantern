@@ -2,5 +2,6 @@
 dbt-core==1.12.5               # Apache-2.0
 dbt-duckdb==1.11.0             # Apache-2.0
 duckdb==1.5.6                  # MIT
+pyarrow==26.0.0                # Apache-2.0
 sqlfluff==4.4.0                # MIT
 sqlfluff-templater-dbt==4.4.0  # MIT
