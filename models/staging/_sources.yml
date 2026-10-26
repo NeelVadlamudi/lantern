@@ -16,12 +16,14 @@ sources:
       - name: lamp_index
         description: >
           index.csv of the subway on-time performance files: one row per service date with the
-          file URL, size and last-modified time. Read as text; dates are cast where used. Field definitions for the files themselves:
+          file URL, size and last-modified time. Read as text; dates are cast where used. The daily
+          run points LAMP_INDEX_URL at the list built by scripts/lamp_manifest.py, which is
+          index.csv when MBTA serves it and otherwise the daily files that exist. Field definitions for the files themselves:
           https://github.com/mbta/lamp/blob/main/Data_Dictionary.md
         config:
           external_location: >-
             read_csv('{{ var('lamp_index_url', 'data/sample/lamp/index.csv' if var('use_sample', false)
-            else 'https://performancedata.mbta.com/lamp/subway-on-time-performance-v1/index.csv') }}',
+            else env_var('LAMP_INDEX_URL', 'https://performancedata.mbta.com/lamp/subway-on-time-performance-v1/index.csv')) }}',
             header = true, all_varchar = true)
           loaded_at_field: "cast(service_date as timestamp)"
           freshness:

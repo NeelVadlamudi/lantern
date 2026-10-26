@@ -1,3 +1,4 @@
+-- depends_on: {{ ref('stg_lamp__subway_trip_stops') }}
 {# Incremental runs replace whole service dates: a republished LAMP day can drop events,
    and a merge on the row key would keep those stale rows. #}
 {{
@@ -11,7 +12,8 @@
 
 -- Grain: one row per service date, trip, route, vehicle and stop (a train arriving at a stop).
 -- Incremental on service_date. Each run reprocesses the last var('incremental_lookback_days')
--- loaded service dates, because LAMP republishes recent files after late data arrives.
+-- loaded service dates, because LAMP republishes recent files after late data arrives, plus any
+-- older date staging has loaded or re-read since the fact last processed it.
 --
 -- Matched and added trips: is_matched_trip = the trip id is a trip in the GTFS schedule
 -- published for the service date (int_scheduled_subway_trips). LAMP also records trips that
@@ -31,9 +33,21 @@ with recursive source_events as (
     select * from {{ ref('int_trip_stops__performance') }}
 
     {% if is_incremental() %}
-        where service_date >= (
+        where
+            service_date >= (
                 select max(this_fct.service_date) - {{ var('incremental_lookback_days') }}
                 from {{ this }} as this_fct
+            )
+            -- older dates staging (re)loaded since the fact last saw them: a day MBTA published
+            -- late, or a republished file read after the lookback
+            or service_date in (
+                select staged.service_date
+                from {{ ref('stg_lamp__subway_trip_stops') }} as staged
+                left join (
+                    select service_date, max(loaded_at) as loaded_at from {{ this }} group by service_date
+                ) as in_fact on staged.service_date = in_fact.service_date
+                group by staged.service_date, in_fact.loaded_at
+                having in_fact.loaded_at is null or max(staged._loaded_at) > in_fact.loaded_at
             )
     {% endif %}
 
