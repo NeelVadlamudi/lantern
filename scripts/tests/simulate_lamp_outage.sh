@@ -73,7 +73,10 @@ dbt build --profiles-dir . --vars "$(vars "incremental_lookback_days: 0")"
 [ "$(dates)" = "$d1,$d2,$d3" ] || { echo "loaded: $(dates)"; exit 1; }
 before=$(python -c "import duckdb;print(duckdb.connect('$MBTA_DUCKDB_PATH',read_only=True).sql(\"select count(*) from staging.stg_lamp__subway_trip_stops where service_date='$d1'\").fetchone()[0])")
 
-echo "== C. $d1 republished empty"
+echo "== C. $d1 republished empty, warehouse saved before lamp_file_reads existed"
+# The real 2026-10-26 case: the saved warehouse had no lamp_file_reads table, so the tests
+# compiled without the empty-file exclusion and flagged the days just recorded as empty.
+python -c "import duckdb;duckdb.connect('$MBTA_DUCKDB_PATH').sql('drop table staging.lamp_file_reads')"
 cp "$sim/empty.parquet" "$bucket/$(f $d1)"
 touch "$bucket/$(f $d1)"
 manifest

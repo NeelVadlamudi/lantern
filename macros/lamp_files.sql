@@ -102,10 +102,7 @@
         {%- if n > 0 -%}{%- do urls.append(row[0]) -%}{%- else -%}{%- do empty.append(row[1]) -%}{%- endif -%}
     {%- endfor -%}
     {%- call statement('log_lamp_file_reads') -%}
-        create schema if not exists {{ log_rel.schema }};
-        create table if not exists {{ log_rel }} (
-            service_date date, last_modified_utc timestamp, file_url varchar, num_rows bigint, checked_at timestamp
-        );
+        {{ lamp_file_reads_ddl() }}
         insert into {{ log_rel }} values {{ values | join(', ') }};
     {%- endcall -%}
     {%- if empty | length > 0 -%}
@@ -120,15 +117,24 @@
     {{ return(api.Relation.create(database=target.database, schema='staging', identifier='lamp_file_reads')) }}
 {% endmacro %}
 
-{#- Select of (service_date, last_modified_utc) for the LAMP file versions that were checked and
-    held no rows. Empty (no rows) when nothing has been recorded yet. -#}
-{% macro lamp_empty_file_versions() %}
+{#- Creates lamp_file_reads if it is missing. Run from on-run-start, so the table exists before
+    any node is compiled: dbt caches the relations in the warehouse when a run starts, and a table
+    first created mid-run is not in that cache. (On the first run after this table was added, the
+    tests looked it up in the cache, did not find it, and compiled without the empty-file
+    exclusion, so they flagged the empty republished days the run had just recorded.) -#}
+{% macro lamp_file_reads_ddl() %}
     {%- set rel = lamp_file_reads_relation() -%}
-    {%- if execute and adapter.get_relation(database=rel.database, schema=rel.schema, identifier=rel.identifier) -%}
-        (select distinct service_date, last_modified_utc from {{ rel }} where num_rows = 0)
-    {%- else -%}
-        (select cast(null as date) as service_date, cast(null as timestamp) as last_modified_utc where false)
-    {%- endif -%}
+    create schema if not exists {{ rel.schema }};
+    create table if not exists {{ rel }} (
+        service_date date, last_modified_utc timestamp, file_url varchar, num_rows bigint, checked_at timestamp
+    );
+{% endmacro %}
+
+{#- Select of (service_date, last_modified_utc) for the LAMP file versions that were checked and
+    held no rows. The table always exists (on-run-start), so it is read directly rather than
+    looked up in dbt's relation cache. -#}
+{% macro lamp_empty_file_versions() %}
+    (select distinct service_date, last_modified_utc from {{ lamp_file_reads_relation() }} where num_rows = 0)
 {% endmacro %}
 
 {#- Keep a reference table between builds; re-read its remote source only on the first build,

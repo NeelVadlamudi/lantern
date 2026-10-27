@@ -61,6 +61,9 @@ vars:
   check_incremental: false     # true = enable the tests in tests/incremental/ (see README)
   check_build: false           # true = enable tests/assert_build_has_no_failures.sql (see README)
 
+on-run-start:
+  - "{{ lamp_file_reads_ddl() }}"
+
 on-run-end:
   - "{{ write_build_outputs(results) }}"
 

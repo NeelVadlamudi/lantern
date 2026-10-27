@@ -44,7 +44,11 @@ with recursive source_events as (
                 select staged.service_date
                 from {{ ref('stg_lamp__subway_trip_stops') }} as staged
                 left join (
-                    select service_date, max(loaded_at) as loaded_at from {{ this }} group by service_date
+                    select
+                        service_date,
+                        max(loaded_at) as loaded_at
+                    from {{ this }}
+                    group by service_date
                 ) as in_fact on staged.service_date = in_fact.service_date
                 group by staged.service_date, in_fact.loaded_at
                 having in_fact.loaded_at is null or max(staged._loaded_at) > in_fact.loaded_at
