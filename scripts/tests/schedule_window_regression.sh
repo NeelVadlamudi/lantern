@@ -7,7 +7,7 @@
 # kpi_duplicate_attribution_deterministic passes after the second run.
 # Usage: scripts/tests/schedule_window_regression.sh [scratch.duckdb]   (reads real LAMP files)
 set -euo pipefail
-db="${1:-/tmp/schedule_window_regression.duckdb}"
+db="${1:-$(mktemp -u -t schedule_window_XXXXXX).duckdb}"
 rm -f "$db" "$db.wal"
 export MBTA_DUCKDB_PATH="$db"
 sel="+fct_trip_stop_events +int_scheduled_subway_trips"
