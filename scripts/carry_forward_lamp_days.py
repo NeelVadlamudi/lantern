@@ -8,15 +8,18 @@ one has no rows for. Only staging.stg_lamp__subway_trip_stops is written (never 
 rows); _loaded_at is set to now, so the next incremental dbt build moves those dates into
 fct_trip_stop_events and recomputes everything downstream with the current models.
 
-After the attempt, every date in the loaded range that still has no staging rows is classed by
-staging.lamp_file_reads (one row per LAMP file the build checked, from the manifest):
-  - no file for the date was listed: a genuine upstream gap (MBTA never published it). Allowed;
-    printed as a GitHub ::notice::.
-  - a file was listed and read with 0 rows (republished empty) and no earlier rows were carried
-    over: the day is lost. Printed as ::error:: and the script exits 1, so the run fails.
+After the attempt, every date in the loaded range that still has no staging rows fails the run
+(::error:: naming the dates, exit 1) unless it is on the explicit allowed-gap list: genuine
+upstream gaps, days MBTA never published, each recorded with a reason. Allowed gaps are printed
+as ::notice::. The error says whether MBTA lists the file (republished empty) or not, from
+staging.lamp_file_reads, so a new genuine gap can be checked and added to the list on purpose.
+
+Allowed-gap list: scripts/lamp_allowed_gaps.txt by default, or the path in LAMP_ALLOWED_GAPS.
+One date per line (YYYY-MM-DD), then the reason; # starts a comment.
 
 Usage: python3 scripts/carry_forward_lamp_days.py NEW.duckdb PREVIOUS.duckdb
 """
+import datetime
 import os
 import sys
 
@@ -24,6 +27,18 @@ import duckdb
 
 TABLE = "staging.stg_lamp__subway_trip_stops"
 READS = "staging.lamp_file_reads"
+DEFAULT_ALLOWED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lamp_allowed_gaps.txt")
+
+
+def load_allowed(path=None):
+    path = path or os.environ.get("LAMP_ALLOWED_GAPS") or DEFAULT_ALLOWED
+    allowed = set()
+    if os.path.exists(path):
+        for line in open(path):
+            line = line.split("#", 1)[0].strip()
+            if line:
+                allowed.add(datetime.date.fromisoformat(line.split()[0]))
+    return allowed
 
 
 def _missing(con):
@@ -36,7 +51,7 @@ def _missing(con):
         order by 1""").fetchall()]
 
 
-def carry_forward(new_path, prev_path):
+def carry_forward(new_path, prev_path, allowed=None):
     """Returns (carried, upstream_gaps, lost) as lists of dates."""
     con = duckdb.connect(new_path)
     missing = _missing(con)
@@ -68,13 +83,22 @@ def carry_forward(new_path, prev_path):
             f"select distinct service_date from {READS} where service_date in (select unnest(?::date[]))",
             [still]).fetchall()}
     con.close()
-    gaps = [d for d in still if d not in listed]
-    lost = [d for d in still if d in listed]
+    allowed = load_allowed() if allowed is None else set(allowed)
+    gaps = [d for d in still if d in allowed]
+    lost = [d for d in still if d not in allowed]
     if gaps:
-        print("::notice::LAMP never published (upstream gap, allowed): " + ", ".join(map(str, gaps)))
+        print("::notice::Known upstream LAMP gap (on the allowed-gap list): " + ", ".join(map(str, gaps)))
     if lost:
-        print("::error::No rows for " + ", ".join(map(str, lost)) + ": MBTA lists the file but it is "
-              "empty, and no earlier rows could be carried over from a previous warehouse")
+        empty = [str(d) for d in lost if d in listed]
+        unlisted = [str(d) for d in lost if d not in listed]
+        why = []
+        if empty:
+            why.append("republished empty (MBTA lists the file, 0 rows): " + ", ".join(empty))
+        if unlisted:
+            why.append("not published by MBTA: " + ", ".join(unlisted))
+        print("::error::No staging rows for " + ", ".join(map(str, lost)) + " and no earlier rows could be "
+              "carried over; " + "; ".join(why) + ". Add a date to scripts/lamp_allowed_gaps.txt only "
+              "if it is a genuine upstream gap.")
     return carried, gaps, lost
 
 

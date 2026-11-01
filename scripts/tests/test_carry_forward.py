@@ -44,15 +44,18 @@ class CarryForward(unittest.TestCase):
     def tearDown(self):
         self.dir.cleanup()
 
-    def run_cli(self):
+    def run_cli(self, allowed=()):
+        gaps = Path(self.dir.name) / "allowed.txt"
+        gaps.write_text("# test list\n" + "".join(f"{d} genuine gap\n" for d in allowed))
+        env = dict(os.environ, LAMP_ALLOWED_GAPS=str(gaps))
         return subprocess.run([sys.executable, str(SCRIPT), str(self.new), str(self.prev)],
-                              capture_output=True, text=True)
+                              capture_output=True, text=True, env=env)
 
     def test_republished_empty_without_previous_fails(self):
         make(self.new, {D1: 2, D3: 2}, {D1: 2, D2: 0, D3: 2})
         out = self.run_cli()
         self.assertEqual(out.returncode, 1)
-        self.assertIn("::error::No rows for 2026-09-09", out.stdout)
+        self.assertIn("::error::No staging rows for 2026-09-09", out.stdout)
 
     def test_previous_without_the_day_fails(self):
         make(self.new, {D1: 2, D3: 2}, {D1: 2, D2: 0, D3: 2})
@@ -74,15 +77,28 @@ class CarryForward(unittest.TestCase):
         self.assertEqual(counts, {D1: 2, D2: 3, D3: 2})
         self.assertEqual(tables, 2)
 
-    def test_never_published_day_is_allowed_notice(self):
+    def test_republished_empty_on_allowed_list_passes(self):
+        make(self.new, {D1: 2, D3: 2}, {D1: 2, D2: 0, D3: 2})
+        out = self.run_cli(allowed=[D2])
+        self.assertEqual(out.returncode, 0, out.stdout)
+        self.assertNotIn("::error::", out.stdout)
+        self.assertIn("::notice::Known upstream LAMP gap (on the allowed-gap list): 2026-09-09", out.stdout)
+
+    def test_unpublished_day_not_on_list_fails(self):
         make(self.new, {D1: 2, D3: 2}, {D1: 2, D3: 2})
         out = self.run_cli()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("not published by MBTA: 2026-09-09", out.stdout)
+
+    def test_unpublished_day_on_list_passes(self):
+        make(self.new, {D1: 2, D3: 2}, {D1: 2, D3: 2})
+        out = self.run_cli(allowed=[D2])
         self.assertEqual(out.returncode, 0, out.stdout)
-        self.assertIn("::notice::LAMP never published (upstream gap, allowed): 2026-09-09", out.stdout)
+        self.assertIn("::notice::", out.stdout)
 
     def test_no_missing_days(self):
         make(self.new, {D1: 1, D2: 1}, {D1: 1, D2: 1})
-        self.assertEqual(carry_forward(str(self.new), str(self.prev)), ([], [], []))
+        self.assertEqual(carry_forward(str(self.new), str(self.prev), allowed=set()), ([], [], []))
 
 
 if __name__ == "__main__":
