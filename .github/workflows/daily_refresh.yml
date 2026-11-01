@@ -161,8 +161,10 @@ jobs:
             echo "Build or tests failed: the last good site will be republished"
           fi
 
+      # Branch runs (workflow_dispatch on a branch) build and test only: the warehouse and site
+      # caches are saved, and Pages is deployed, from refs/heads/main alone.
       - name: Save warehouse
-        if: steps.outcome.outputs.good == 'true'
+        if: steps.outcome.outputs.good == 'true' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@v6
         with:
           path: warehouse/mbta.duckdb
@@ -232,7 +234,7 @@ jobs:
         run: bash scripts/leak_scan.sh _site
 
       - name: Save site as last good
-        if: steps.outcome.outputs.good == 'true' && steps.site_scan.outcome == 'success'
+        if: steps.outcome.outputs.good == 'true' && steps.site_scan.outcome == 'success' && github.ref == 'refs/heads/main'
         uses: actions/cache/save@v6
         with:
           path: _site
@@ -244,7 +246,7 @@ jobs:
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/upload-pages-artifact@v5
-        if: steps.site.outputs.ready == 'true'
+        if: steps.site.outputs.ready == 'true' && github.ref == 'refs/heads/main'
         with:
           path: _site
 
@@ -258,7 +260,7 @@ jobs:
 
   deploy:
     needs: build
-    if: ${{ !cancelled() && needs.build.outputs.site_ready == 'true' }}
+    if: ${{ !cancelled() && needs.build.outputs.site_ready == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     permissions:
       pages: write
@@ -274,7 +276,7 @@ jobs:
   # Fails if the live site's data is more than 26 hours old, so stale data cannot look green.
   site_freshness:
     needs: deploy
-    if: ${{ !cancelled() }}
+    if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
