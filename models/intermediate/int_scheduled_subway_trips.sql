@@ -1,4 +1,5 @@
--- Grain: one row per scheduled subway trip and LAMP service date loaded in staging. This covers
+-- Grain: one row per scheduled subway trip and service date that is either loaded in LAMP staging
+-- or in the reporting window (dim_dates, so an unpublished day still has its schedule). This covers
 -- every date fct_trip_stop_events keeps, not only the reporting window (dim_dates): the fact and
 -- its tests read is_matched_trip from here for older dates too, so a date that has left the
 -- window must still find its schedule. Marts that report the window filter on dim_dates.
@@ -15,9 +16,13 @@ with dates as (
         service_date,
         isodow(service_date) as iso_dow
     from (
-        select distinct service_date
+        select service_date
         from {{ ref('stg_lamp__subway_trip_stops') }}
-    ) as loaded_dates
+        union
+        -- every calendar date in the window too, including a day MBTA has not published
+        select date_day as service_date
+        from {{ ref('dim_dates') }}
+    ) as covered_dates
 
 ),
 

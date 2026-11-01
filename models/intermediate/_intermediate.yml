@@ -103,3 +103,46 @@ models:
         data_tests: [not_null]
       - name: route_id
         data_tests: [not_null]
+
+unit_tests:
+  - name: scheduled_trips_cover_loaded_dates_outside_window
+    description: >
+      Regression for the Nov 1 2026 refresh failure. A service date still loaded in LAMP staging
+      but already outside the reporting window (dim_dates) must keep its schedule, so
+      fct_trip_stop_events.is_matched_trip and duplicate attribution for that date match what a
+      later incremental run recomputes. Old logic built dates from dim_dates and returned nothing
+      for 2026-07-31; the first fix (loaded dates only) dropped 2026-10-23, a window day MBTA
+      did not publish (caught by scripts/tests/simulate_lamp_outage.sh case A).
+    model: int_scheduled_subway_trips
+    given:
+      - input: ref('stg_lamp__subway_trip_stops')
+        format: sql
+        rows: |
+          select date '2026-07-31' as service_date union all select date '2026-10-30'
+      - input: ref('dim_dates')
+        format: sql
+        rows: |
+          select date '2026-10-30' as date_day union all select date '2026-10-23'
+      - input: ref('stg_gtfs__calendar')
+        format: sql
+        rows: |
+          select 'S' as service_id, false as runs_monday, false as runs_tuesday, false as runs_wednesday,
+            false as runs_thursday, true as runs_friday, false as runs_saturday, false as runs_sunday,
+            date '2026-07-01' as start_date, date '2026-12-31' as end_date,
+            date '2026-07-01' as valid_from_date, date '2026-12-31' as valid_to_date
+      - input: ref('stg_gtfs__calendar_dates')
+        format: sql
+        rows: |
+          select 'S' as service_id, date '2026-01-01' as service_date, 2 as exception_type,
+            date '2026-01-01' as valid_from_date, date '2026-01-01' as valid_to_date
+          where false
+      - input: ref('stg_gtfs__subway_trips')
+        format: sql
+        rows: |
+          select 'Red' as route_id, 'T1' as trip_id, 0 as direction_id, 'S' as service_id,
+            date '2026-07-01' as valid_from_date, date '2026-12-31' as valid_to_date
+    expect:
+      rows:
+        - {service_date: 2026-07-31, route_id: Red, trip_id: T1, direction_id: 0, service_id: S}
+        - {service_date: 2026-10-23, route_id: Red, trip_id: T1, direction_id: 0, service_id: S}
+        - {service_date: 2026-10-30, route_id: Red, trip_id: T1, direction_id: 0, service_id: S}

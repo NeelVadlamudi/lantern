@@ -65,6 +65,21 @@ jobs:
           key: mbta-duckdb-v4-${{ github.run_id }}
           restore-keys: mbta-duckdb-v4-
 
+      # Cache miss only: restore the newest earlier warehouse (any key version) beside it, so
+      # days MBTA has since republished empty (2026-07-16, 2026-09-09) can be carried over.
+      - name: Restore previous warehouse for carry-over
+        id: prev_warehouse
+        if: steps.warehouse.outputs.cache-matched-key == ''
+        uses: actions/cache/restore@v6
+        with:
+          path: warehouse/mbta.duckdb
+          key: mbta-duckdb-prev-${{ github.run_id }}
+          restore-keys: mbta-duckdb-
+
+      - name: Set previous warehouse aside
+        if: steps.prev_warehouse.outputs.cache-matched-key != ''
+        run: mv warehouse/mbta.duckdb warehouse/prev.duckdb
+
       - name: dbt deps
         run: dbt deps --profiles-dir .
 
@@ -115,6 +130,18 @@ jobs:
           done
           dbt run --profiles-dir . -s int_gtfs_stations_as_of
 
+      # New warehouse only: copy staging rows for loaded-range days the new warehouse has none
+      # for (empty republished files) from the previous warehouse, then rebuild incrementally so
+      # they reach the fact and the site. Without this a cold start drops 2026-09-09.
+      - name: Carry over days MBTA republished empty
+        id: carry
+        if: steps.build.outcome == 'success' && steps.build.outputs.fresh == 'true'
+        continue-on-error: true
+        run: |
+          python3 scripts/carry_forward_lamp_days.py warehouse/mbta.duckdb warehouse/prev.duckdb
+          rm -f warehouse/prev.duckdb
+          dbt build --profiles-dir . --vars "$(scripts/mirror_open_data.sh warehouse/mirror)"
+
       - name: Check the build recorded no failures
         id: check
         if: steps.build.outcome == 'success'
@@ -126,7 +153,8 @@ jobs:
         id: outcome
         run: |
           if [ "${{ steps.build.outcome }}" = "success" ] && [ "${{ steps.check.outcome }}" = "success" ] \
-             && [ "${{ steps.replay.outcome }}" != "failure" ] && [ -f out/board_data.json ]; then
+             && [ "${{ steps.replay.outcome }}" != "failure" ] \
+             && [ "${{ steps.carry.outcome }}" != "failure" ] && [ -f out/board_data.json ]; then
             echo "good=true" >> "$GITHUB_OUTPUT"
           else
             echo "good=false" >> "$GITHUB_OUTPUT"
