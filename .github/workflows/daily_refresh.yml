@@ -248,3 +248,14 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v5
+
+  # Runs after every deploy attempt, including days the last good build was kept.
+  # Fails if the live site's data is more than 26 hours old, so stale data cannot look green.
+  site_freshness:
+    needs: deploy
+    if: ${{ !cancelled() }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Check live site data age
+        run: python3 scripts/site_freshness.py "https://neelvadlamudi.github.io/lantern/data/board_data.json"
