@@ -1,4 +1,5 @@
 import sys
+import unittest
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -12,20 +13,23 @@ def board(ts):
     return {"build": {"generated_at_utc": ts}}
 
 
-def test_fresh_build_passes():
-    assert check(board("2026-11-01T12:00:00.000000Z"), NOW)[0]
+class SiteFreshness(unittest.TestCase):
+    def test_fresh_build_passes(self):
+        self.assertTrue(check(board("2026-11-01T12:00:00.000000Z"), NOW)[0])
+
+    def test_oct29_build_fails_and_names_date(self):
+        ok, msg = check(board("2026-10-29T17:31:48.786208Z"), NOW)
+        self.assertFalse(ok)
+        self.assertIn("2026-10-29", msg)
+
+    def test_just_over_limit_fails(self):
+        ts = (NOW - timedelta(hours=26, minutes=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
+        self.assertFalse(check(board(ts), NOW)[0])
+
+    def test_missing_or_bad_timestamp_fails(self):
+        self.assertFalse(check({}, NOW)[0])
+        self.assertFalse(check(board("yesterday"), NOW)[0])
 
 
-def test_oct29_build_fails_and_names_date():
-    ok, msg = check(board("2026-10-29T17:31:48.786208Z"), NOW)
-    assert not ok and "2026-10-29" in msg
-
-
-def test_just_over_limit_fails():
-    ts = (NOW - timedelta(hours=26, minutes=1)).strftime("%Y-%m-%dT%H:%M:%S.%fZ")
-    assert not check(board(ts), NOW)[0]
-
-
-def test_missing_or_bad_timestamp_fails():
-    assert not check({}, NOW)[0]
-    assert not check(board("yesterday"), NOW)[0]
+if __name__ == "__main__":
+    unittest.main()

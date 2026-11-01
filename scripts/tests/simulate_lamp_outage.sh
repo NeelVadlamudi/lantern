@@ -63,6 +63,10 @@ manifest
 jq -e --arg d $d2 '.list_source == "file probe" and (.not_published | index($d)) != null' "$sim/gaps.json"
 dbt build --profiles-dir . --full-refresh --vars "$(vars "lamp_start_date: $d1")"
 [ "$(dates)" = "$d1,$d3" ] || { echo "loaded: $(dates)"; exit 1; }
+# Cold-start gap check: a day MBTA never published is an allowed gap (notice), not a failure.
+carry=$(python3 scripts/carry_forward_lamp_days.py "$MBTA_DUCKDB_PATH" warehouse/sim_no_previous.duckdb)
+echo "$carry"
+echo "$carry" | grep -q "::notice::LAMP never published (upstream gap, allowed): $d2" || exit 1
 
 echo "== B. $d2 published late"
 mv "$sim/$(f $d2)" "$bucket/"
