@@ -41,7 +41,14 @@ def load_allowed(path=None):
 def check(db_path, window_days, allowed=None):
     """Returns (first, last, missing_allowed, missing_failing)."""
     allowed = load_allowed() if allowed is None else set(allowed)
+    if not os.path.exists(db_path):
+        raise SystemExit(f"::error::No warehouse at {db_path}; the reporting window cannot be checked")
     con = duckdb.connect(db_path, read_only=True)
+    found = {r[0] for r in con.execute(
+        "select table_schema || '.' || table_name from information_schema.tables").fetchall()}
+    if not {STAGING, TRIPS} <= found:
+        con.close()
+        raise SystemExit(f"::error::{db_path} has no {STAGING} or {TRIPS}; the reporting window cannot be checked")
     last = con.execute(f"select max(service_date) from {STAGING}").fetchone()[0]
     if last is None:
         con.close()

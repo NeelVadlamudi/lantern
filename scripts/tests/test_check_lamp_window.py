@@ -80,6 +80,23 @@ class WindowGapCheck(unittest.TestCase):
         self.assertIn("90 dates): 10 with trips", out.stdout)
         self.assertIn("2026-08-03 (no staging rows)", out.stdout)
 
+    def test_missing_first_day_fails(self):
+        days = [d for d in self.window if d != self.window[-1]]  # Aug 3, the window's first date
+        make(self.db, days, days)
+        out = self.run_check()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("2026-08-03 (no staging rows)", out.stdout)
+
+    def test_missing_warehouse_or_tables_fails_cleanly(self):
+        out = self.run_check()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("::error::No warehouse at", out.stderr)
+        duckdb.connect(str(self.db)).close()
+        out = self.run_check()
+        self.assertEqual(out.returncode, 1)
+        self.assertIn("has no staging.stg_lamp__subway_trip_stops or marts.fct_trips", out.stderr)
+        self.assertNotIn("Traceback", out.stderr)
+
     def test_window_days_option(self):
         make(self.db, [LAST, LAST - timedelta(days=2)], [LAST, LAST - timedelta(days=2)])
         out = self.run_check((), "--window-days", "3")

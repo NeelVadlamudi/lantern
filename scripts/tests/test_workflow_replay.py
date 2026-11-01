@@ -1,12 +1,13 @@
 """Replays the daily refresh's warehouse steps in workflow order on small synthetic data.
 
 Runs the real run: blocks of .github/workflows/daily_refresh.yml, from "Set previous warehouse
-aside" through "Decide what to publish" (restore, set aside, source freshness, build, replay,
-carry-over, gap check, outcome), with the step if: conditions evaluated. dbt is a stub that acts
+aside" through "Fail the run when the last good site was served" (set aside, source freshness,
+build, snapshot replay, carry-over, gap check, outcome, fallback alarm), with the step if:
+conditions evaluated as GitHub does (no status function means success()). dbt is a stub that acts
 like dbt on the warehouse file: `source freshness` opens (and so creates) the DuckDB file at
 MBTA_DUCKDB_PATH, and `build` loads the 90-day window when staging is empty, except
 2026-09-09, which MBTA republished empty, then rebuilds marts.fct_trips from staging. The
-network-only "LAMP file list" step is skipped and scripts/mirror_open_data.sh is stubbed.
+network- or site-only steps (LAMP file list, Docs, Assemble site, Health log, site leak scan) are skipped and scripts/mirror_open_data.sh is stubbed.
 
 REPLAY_REF=<git ref> replays that commit's workflow and scripts instead of the working tree
 (REPLAY_REF=d63d44a fails: its source freshness step creates the warehouse file, the build
@@ -38,10 +39,15 @@ DBT_STUB = textwrap.dedent(f"""\
     import os, sys, duckdb
     from datetime import date, timedelta
     args = [a for a in sys.argv[1:] if a != "--quiet"]
+    open(os.environ["DBT_CALLS"], "a").write(" ".join(args) + chr(10))
+    if args[0] == "build" and os.environ.get("STUB_BUILD_FAIL"):
+        sys.exit(1)
+    if args[0] == "run-operation":
+        print("2026-08-01", "2026-09-01", sep=chr(10))       # two GTFS versions to replay
     path = os.environ.get("MBTA_DUCKDB_PATH", "warehouse/mbta.duckdb")
     if args[:2] == ["source", "freshness"]:
         duckdb.connect(path).close()          # like dbt: opening the profile's path creates it
-    elif args[0] == "build":
+    elif args[0] == "build" and "-s" not in args:
         con = duckdb.connect(path)
         con.execute("create schema if not exists staging; create schema if not exists marts")
         if not con.execute("select count(*) from information_schema.tables where table_schema = 'staging'"
@@ -78,12 +84,18 @@ def evaluate(expr, steps, cwd):
             return repr(step.get("outcome", ""))
         return repr(step.get("outputs", {}).get(m.group(3), ""))
     expr = re.sub(r"steps\.([\w-]+)\.(outcome|outputs\.([\w-]+))", lookup, expr)
+    expr = re.sub(r"always\(\)", "True", expr)
+    expr = re.sub(r"cancelled\(\)", "False", expr)
     expr = expr.replace("&&", " and ").replace("||", " or ")
     expr = re.sub(r"!(?!=)", " not ", expr)
     return eval(expr, {}, {})
 
 
-def replay(prev_days=None, warm_days=None, allowed=()):
+SKIP = {"LAMP file list", "Docs", "Assemble site (this run)", "Health log", "Leak scan (site)"}
+STATUS = re.compile(r"always\(\)|failure\(\)|cancelled\(\)|success\(\)")
+
+
+def replay(prev_days=None, warm_days=None, allowed=(), build_fails=False):
     """Returns (steps, work dir). prev_days: a previous warehouse restored on a v4 miss;
     warm_days: a v4 warehouse restored."""
     work = Path(tempfile.mkdtemp(prefix="replay_"))
@@ -118,17 +130,25 @@ def replay(prev_days=None, warm_days=None, allowed=()):
     wf = yaml.safe_load((work / ".github/workflows/daily_refresh.yml").read_text())
     job = next(j for j in wf["jobs"].values() if any(s.get("name") == "Set previous warehouse aside" for s in j["steps"]))
     names = [s.get("name") for s in job["steps"]]
-    seq = job["steps"][names.index("Set previous warehouse aside"):names.index("Decide what to publish") + 1]
-    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", RUNNER_TEMP=str(runner_temp))
+    seq = job["steps"][names.index("Set previous warehouse aside"):names.index("Fail the run when the last good site was served") + 1]
+    env = dict(os.environ, PATH=f"{bin_dir}:{os.environ['PATH']}", RUNNER_TEMP=str(runner_temp),
+               DBT_CALLS=str(work / "dbt_calls.txt"))
+    if build_fails:
+        env["STUB_BUILD_FAIL"] = "1"
     env.pop("MBTA_DUCKDB_PATH", None)
     env.pop("LAMP_ALLOWED_GAPS", None)
     halted = False
     for i, step in enumerate(seq):
         sid = step.get("id", f"_{i}")
-        if "run" not in step or step.get("name") == "LAMP file list":
+        if "run" not in step or step.get("name") in SKIP:
             continue
         cond = step.get("if")
-        if halted or (cond and not evaluate(cond, steps, work)):
+        if cond and STATUS.search(cond):
+            cond = cond.replace("success()", repr(not halted)).replace("failure()", repr(halted))
+            run = evaluate(cond, steps, work)
+        else:
+            run = not halted and (not cond or evaluate(cond, steps, work))
+        if not run:
             steps[sid] = {"outcome": "skipped", "outputs": {}}
             continue
         script = re.sub(r"\$\{\{(.*?)\}\}", lambda m: str(evaluate(m.group(1), steps, work)).replace("True", "true")
@@ -142,6 +162,7 @@ def replay(prev_days=None, warm_days=None, allowed=()):
                       "log": r.stdout + r.stderr}
         if r.returncode and not step.get("continue-on-error"):
             halted = True
+    steps["job"] = {"outcome": "failure" if halted else "success"}
     return steps, work
 
 
@@ -166,24 +187,49 @@ class WorkflowReplay(unittest.TestCase):
         self.assertIn(SEP9, trip_dates(self.work), self.describe(steps))
         self.assertEqual(steps["carry"]["outcome"], "success", self.describe(steps))
         self.assertEqual(steps["outcome"]["outputs"].get("good"), "true", self.describe(steps))
+        self.assertEqual(steps["job"]["outcome"], "success", self.describe(steps))
+
+    def test_cold_restore_replays_station_snapshots(self):
+        steps, self.work = replay(prev_days=WINDOW)
+        self.assertEqual(steps["replay"]["outcome"], "success", self.describe(steps))
+        calls = (self.work / "dbt_calls.txt").read_text()
+        for d in ("2026-08-01", "2026-09-01"):
+            self.assertIn(f"build --profiles-dir . -s int_gtfs_stations_as_of snap_gtfs_stations --vars {{gtfs_as_of: '{d}'}}", calls)
+
+    def assert_red(self, steps):
+        self.assertEqual(steps["gaps"]["outcome"], "failure", self.describe(steps))
+        self.assertEqual(steps["outcome"]["outputs"].get("good"), "false", self.describe(steps))
+        alarm = next(v for k, v in steps.items() if "Daily refresh fell back" in v.get("log", ""))
+        self.assertEqual(alarm["outcome"], "failure")
+        self.assertEqual(steps["job"]["outcome"], "failure")
 
     def test_cold_start_without_previous_day_goes_red(self):
         steps, self.work = replay()
         self.assertNotIn(SEP9, trip_dates(self.work))
-        self.assertEqual(steps["outcome"]["outputs"].get("good"), "false", self.describe(steps))
+        self.assert_red(steps)
+        self.assertIn("::error::Missing service dates in the 90-day window: 2026-09-09", steps["gaps"]["log"])
+
+    def test_failed_build_fails_the_gap_check_cleanly(self):
+        steps, self.work = replay(prev_days=WINDOW, build_fails=True)
+        self.assertEqual(steps["build"]["outcome"], "failure")
+        self.assert_red(steps)
+        self.assertIn("::error::dbt build did not succeed (failure)", steps["gaps"]["log"])
+        self.assertNotIn("Traceback", steps["gaps"]["log"])
 
     def test_cold_start_without_previous_day_on_allowed_list_publishes(self):
         steps, self.work = replay(allowed=[SEP9])
         self.assertEqual(steps["outcome"]["outputs"].get("good"), "true", self.describe(steps))
+        self.assertEqual(steps["job"]["outcome"], "success", self.describe(steps))
 
     def test_warm_run_with_full_window_publishes(self):
         steps, self.work = replay(warm_days=WINDOW)
         self.assertEqual(steps["carry"]["outcome"], "skipped")
         self.assertEqual(steps["outcome"]["outputs"].get("good"), "true", self.describe(steps))
+        self.assertEqual(steps["job"]["outcome"], "success", self.describe(steps))
 
     def test_warm_run_missing_a_day_goes_red(self):
         steps, self.work = replay(warm_days=[d for d in WINDOW if d != SEP9])
-        self.assertEqual(steps["outcome"]["outputs"].get("good"), "false", self.describe(steps))
+        self.assert_red(steps)
 
 
 if __name__ == "__main__":

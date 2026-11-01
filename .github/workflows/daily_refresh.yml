@@ -153,14 +153,6 @@ jobs:
             dbt build --profiles-dir . --vars "$(scripts/mirror_open_data.sh warehouse/mirror)"
           fi
 
-      # Every run, warm or cold: each of the last reporting_window_days calendar dates must have
-      # trips in fct_trips, unless it is on scripts/lamp_allowed_gaps.txt.
-      - name: Check the reporting window has no missing days
-        id: gaps
-        if: steps.build.outcome == 'success'
-        continue-on-error: true
-        run: python3 scripts/check_lamp_window.py warehouse/mbta.duckdb
-
       - name: Check the build recorded no failures
         id: check
         if: steps.build.outcome == 'success'
@@ -168,8 +160,23 @@ jobs:
         run: |
           dbt test --profiles-dir . --select tag:post_build --vars '{check_build: true}'
 
+      # Every run, warm or cold, after the carry-over and its rebuild: each of the last
+      # reporting_window_days calendar dates must have trips in fct_trips, unless it is on
+      # scripts/lamp_allowed_gaps.txt. A missing day fails the job (no continue-on-error), so
+      # nothing is published or saved; a failed or skipped build fails here too.
+      - name: Check the reporting window has no missing days
+        id: gaps
+        if: always()
+        run: |
+          if [ "${{ steps.build.outcome }}" != "success" ]; then
+            echo "::error::dbt build did not succeed (${{ steps.build.outcome }}); the reporting window was not checked"
+            exit 1
+          fi
+          python3 scripts/check_lamp_window.py warehouse/mbta.duckdb
+
       - name: Decide what to publish
         id: outcome
+        if: always()
         run: |
           if [ "${{ steps.build.outcome }}" = "success" ] && [ "${{ steps.check.outcome }}" = "success" ] \
              && [ "${{ steps.replay.outcome }}" != "failure" ] \
