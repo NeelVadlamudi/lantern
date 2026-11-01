@@ -271,7 +271,9 @@ from_gtfs as (
         cast(null as timestamp) as alert_first_active_at,
         scheduled.service_id
     from {{ ref('int_scheduled_subway_trips') }} as scheduled
-    where scheduled.service_id like 'DIV%'
+    where
+        scheduled.service_id like 'DIV%'
+        and scheduled.service_date in (select dates.service_date from dates)
 
 ),
 

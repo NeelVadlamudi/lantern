@@ -1187,6 +1187,15 @@ latest_day as (
                 -- with no earlier day of the same type (a holiday early in the window) the typical
                 -- value is null, so the sentence says there is nothing to compare with
                 'comparison', case
+                    -- no run compared with the schedule (e.g. a whole-line diversion timetable):
+                    -- late_share is null, and format() would return a null sentence
+                    when measures.late_share is null
+                        then format(
+                                'No train runs could be compared with their scheduled run time on this'
+                                || ' {} ({:,} compared).',
+                                latest_date.day_type,
+                                cast(coalesce(measures.trips_compared, 0) as bigint)
+                            )
                     when measures.typical_days > 0 and measures.typical_is_thin
                         then format(
                                 '{:.1f}% of train runs took more than {} minutes over their scheduled run'

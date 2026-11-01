@@ -1,4 +1,7 @@
--- Grain: one row per scheduled subway trip and service date in the loaded window (dim_dates).
+-- Grain: one row per scheduled subway trip and LAMP service date loaded in staging. This covers
+-- every date fct_trip_stop_events keeps, not only the reporting window (dim_dates): the fact and
+-- its tests read is_matched_trip from here for older dates too, so a date that has left the
+-- window must still find its schedule. Marts that report the window filter on dim_dates.
 -- A trip is scheduled on a date when, in the GTFS archive rows valid on that date, its service_id
 -- runs that weekday between the calendar start and end dates and is not removed on the date
 -- (calendar_dates exception_type 2), or is added on the date (exception_type 1). This is the
@@ -9,9 +12,12 @@
 with dates as (
 
     select
-        date_day as service_date,
-        isodow(date_day) as iso_dow
-    from {{ ref('dim_dates') }}
+        service_date,
+        isodow(service_date) as iso_dow
+    from (
+        select distinct service_date
+        from {{ ref('stg_lamp__subway_trip_stops') }}
+    ) as loaded_dates
 
 ),
 

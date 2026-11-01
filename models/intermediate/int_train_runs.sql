@@ -57,7 +57,13 @@ events as (
         {{ to_boston_time('stops.moved_at') }} as departed_start_at,
         {{ to_boston_time('stops.stopped_at') }} as arrived_at,
         fct.previous_recorded_station_id as previous_station_id,
-        {{ to_boston_time('previous_stops.stopped_at') }} as arrived_start_at
+        {{ to_boston_time('previous_stops.stopped_at') }} as arrived_start_at,
+        -- durations come from the recorded instants, not Boston wall-clock times: on the night
+        -- clocks fall back, wall-clock time repeats an hour and a span across 2 a.m. would lose
+        -- 3,600 seconds
+        epoch(stops.moved_at) as departed_start_epoch,
+        epoch(stops.stopped_at) as arrived_epoch,
+        epoch(previous_stops.stopped_at) as arrived_start_epoch
     from {{ ref('fct_trip_stop_events') }} as fct
     left join stops on fct.trip_stop_event_key = stops.trip_stop_event_key
     left join stops as previous_stops on fct.previous_recorded_event_key = previous_stops.trip_stop_event_key
@@ -100,9 +106,9 @@ timed as (
             when events.scheduled_run_seconds <= 0 then 'scheduled_not_positive'
             else 'compared'
         end as run_comparison_status,
-        epoch(events.departed_start_at) - epoch(events.arrived_start_at) as dwell_at_start_seconds,
-        epoch(events.arrived_at) - epoch(events.departed_start_at) as in_motion_seconds,
-        epoch(events.arrived_at) - epoch(events.arrived_start_at) as recorded_span_seconds
+        events.departed_start_epoch - events.arrived_start_epoch as dwell_at_start_seconds,
+        events.arrived_epoch - events.departed_start_epoch as in_motion_seconds,
+        events.arrived_epoch - events.arrived_start_epoch as recorded_span_seconds
     from events
     inner join dates on events.date_key = dates.date_key
     left join branch_ends
