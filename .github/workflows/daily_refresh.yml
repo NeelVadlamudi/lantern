@@ -16,8 +16,8 @@ name: "Lantern: daily refresh"
 # With no saved site (first run), nothing is published. The job still ends as failed.
 # data/health.json is the public run log: one line per run (date, pass or fail, row counts,
 # and lamp_files: where the file list came from and any days MBTA has not published or
-# published empty), the last 30 runs, newest first. Missing days do not fail the run; it fails
-# when no new service date has arrived for three days (tests/assert_fact_is_current.sql).
+# published empty), the last 30 runs, newest first. Missing days do not fail the run on their
+# own, but any run that republishes the last good site ends as failed (scripts/fallback_alarm.sh).
 
 on:
   schedule:
@@ -220,20 +220,13 @@ jobs:
         with:
           path: _site
 
-      # A bad day only fails the run (and sends GitHub's alert email) once there has been no
-      # passing run for 3 days in a row. Before that it is logged as a warning and the last good
-      # site stays live.
-      - name: Fail the run only after 3 days without a good build
-        if: steps.outcome.outputs.good != 'true'
-        run: |
-          cutoff=$(TZ=America/New_York date -d '2 days ago' +%F)
-          last_pass=$(jq -r '[.runs[] | select(.status == "pass") | .run_date] | max // ""' previous_health.json 2>/dev/null || echo "")
-          if [ -n "$last_pass" ] && [[ ! "$last_pass" < "$cutoff" ]]; then
-            echo "::warning::This run's build failed; the last good site was kept (last pass $last_pass)."
-            exit 0
-          fi
-          echo "No passing run since ${last_pass:-never}; the last good site was kept."
-          exit 1
+      # Any run that falls back to the last good site ends as failed (GitHub error annotation and
+      # alert email), and names the date of the build being served. Before 2026-11-01 a fallback
+      # exited cleanly for up to 2 days, so Oct 30-31 showed green while Oct 29 data was served.
+      # The deploy job still runs (it only needs site_ready), so health.json is still updated.
+      - name: Fail the run when the last good site was served
+        if: always()
+        run: bash scripts/fallback_alarm.sh "${{ steps.outcome.outputs.good }}" previous_health.json "${{ steps.last_good.outputs.cache-matched-key != '' }}"
 
   deploy:
     needs: build
