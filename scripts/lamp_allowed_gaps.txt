@@ -1,4 +1,4 @@
 # Genuine upstream LAMP gaps: service dates MBTA never published, so a missing day here does
-# not fail the daily refresh (scripts/carry_forward_lamp_days.py prints a ::notice:: instead).
+# not fail the daily refresh (scripts/check_lamp_window.py prints a ::notice:: instead).
 # One date per line, YYYY-MM-DD, then the reason. Add a date only after checking MBTA's index.
 # No genuine gaps in the current loaded range (Jul 15 - Oct 31, 2026).

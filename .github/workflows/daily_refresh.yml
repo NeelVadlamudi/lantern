@@ -80,6 +80,19 @@ jobs:
         if: steps.prev_warehouse.outputs.cache-matched-key != ''
         run: mv warehouse/mbta.duckdb warehouse/prev.duckdb
 
+      # Decided here, before any step can create warehouse/mbta.duckdb: the warehouse is new
+      # unless the v4 cache restored one.
+      - name: Note whether the warehouse is new
+        id: state
+        run: |
+          if [ -f warehouse/mbta.duckdb ]; then
+            echo "Warehouse restored from cache; reading new service dates only"
+            echo "fresh=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "No cached warehouse; building the default window"
+            echo "fresh=true" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: dbt deps
         run: dbt deps --profiles-dir .
 
@@ -100,7 +113,9 @@ jobs:
       - name: Source freshness
         id: freshness
         continue-on-error: true
-        run: dbt source freshness --profiles-dir .
+        # Only the LAMP index CSV is checked; a throwaway database keeps dbt from creating
+        # warehouse/mbta.duckdb before the build.
+        run: MBTA_DUCKDB_PATH="$RUNNER_TEMP/freshness.duckdb" dbt source freshness --profiles-dir .
 
       # refresh_reference re-reads the GTFS archive and the Open Data CSVs into their staging
       # tables once a day; between runs they are kept in the cached warehouse. The Open Data
@@ -109,20 +124,13 @@ jobs:
         id: build
         continue-on-error: true
         run: |
-          if [ -f warehouse/mbta.duckdb ]; then
-            echo "Warehouse restored from cache; reading new service dates only"
-            echo "fresh=false" >> "$GITHUB_OUTPUT"
-          else
-            echo "No cached warehouse; building the default window"
-            echo "fresh=true" >> "$GITHUB_OUTPUT"
-          fi
           dbt build --profiles-dir . --vars "$(scripts/mirror_open_data.sh warehouse/mirror)"
 
       # New warehouse only: drop the snapshot and replay each GTFS version in date order, so
       # dbt_valid_from / dbt_valid_to carry the real GTFS dates.
       - name: Replay station snapshot history
         id: replay
-        if: steps.build.outcome == 'success' && steps.build.outputs.fresh == 'true'
+        if: steps.build.outcome == 'success' && steps.state.outputs.fresh == 'true'
         continue-on-error: true
         run: |
           for d in $(dbt --quiet run-operation station_snapshot_replay_dates --args '{reset: true}' --profiles-dir .); do
@@ -130,17 +138,28 @@ jobs:
           done
           dbt run --profiles-dir . -s int_gtfs_stations_as_of
 
-      # New warehouse only: copy staging rows for loaded-range days the new warehouse has none
-      # for (empty republished files) from the previous warehouse, then rebuild incrementally so
-      # they reach the fact and the site. Without this a cold start drops 2026-09-09.
+      # Whenever a previous warehouse was set aside: copy its staging rows for reporting-window
+      # days the new warehouse has none for (empty republished files), then rebuild
+      # incrementally so they reach the fact and the site. Without this a cold start drops
+      # 2026-09-09. Judging gaps is left to the window check below.
       - name: Carry over days MBTA republished empty
         id: carry
-        if: steps.build.outcome == 'success' && steps.build.outputs.fresh == 'true'
+        if: steps.build.outcome == 'success' && hashFiles('warehouse/prev.duckdb') != ''
         continue-on-error: true
         run: |
           python3 scripts/carry_forward_lamp_days.py warehouse/mbta.duckdb warehouse/prev.duckdb
           rm -f warehouse/prev.duckdb
-          dbt build --profiles-dir . --vars "$(scripts/mirror_open_data.sh warehouse/mirror)"
+          if [ "$(sed -n 's/^carried=//p' "$GITHUB_OUTPUT")" != "0" ]; then
+            dbt build --profiles-dir . --vars "$(scripts/mirror_open_data.sh warehouse/mirror)"
+          fi
+
+      # Every run, warm or cold: each of the last reporting_window_days calendar dates must have
+      # trips in fct_trips, unless it is on scripts/lamp_allowed_gaps.txt.
+      - name: Check the reporting window has no missing days
+        id: gaps
+        if: steps.build.outcome == 'success'
+        continue-on-error: true
+        run: python3 scripts/check_lamp_window.py warehouse/mbta.duckdb
 
       - name: Check the build recorded no failures
         id: check
@@ -154,7 +173,8 @@ jobs:
         run: |
           if [ "${{ steps.build.outcome }}" = "success" ] && [ "${{ steps.check.outcome }}" = "success" ] \
              && [ "${{ steps.replay.outcome }}" != "failure" ] \
-             && [ "${{ steps.carry.outcome }}" != "failure" ] && [ -f out/board_data.json ]; then
+             && [ "${{ steps.carry.outcome }}" != "failure" ] && [ "${{ steps.gaps.outcome }}" = "success" ] \
+             && [ -f out/board_data.json ]; then
             echo "good=true" >> "$GITHUB_OUTPUT"
           else
             echo "good=false" >> "$GITHUB_OUTPUT"

@@ -17,22 +17,18 @@ sys.path.insert(0, str(SCRIPT.parent))
 from carry_forward_lamp_days import carry_forward  # noqa: E402
 
 
-def make(path, staged, reads):
-    """staged: {date: rows}; reads: {date: num_rows} as the manifest recorded them."""
+def make(path, staged):
+    """staged: {date: rows} in staging.stg_lamp__subway_trip_stops."""
     con = duckdb.connect(str(path))
     con.execute("create schema staging")
     con.execute("create table staging.stg_lamp__subway_trip_stops (service_date date, trip_id varchar, _loaded_at timestamp)")
-    con.execute("create table staging.lamp_file_reads (service_date date, last_modified_utc timestamp, "
-                "file_url varchar, num_rows bigint, checked_at timestamp)")
     for d, n in staged.items():
         for i in range(n):
             con.execute("insert into staging.stg_lamp__subway_trip_stops values (?, ?, timestamp '2026-10-01')", [d, f"t{i}"])
-    for d, n in reads.items():
-        con.execute("insert into staging.lamp_file_reads values (?, null, 'f', ?, null)", [d, n])
     con.close()
 
 
-D1, D2, D3 = date(2026, 9, 8), date(2026, 9, 9), date(2026, 9, 10)
+D0, D1, D2, D3 = date(2026, 9, 7), date(2026, 9, 8), date(2026, 9, 9), date(2026, 9, 10)
 
 
 class CarryForward(unittest.TestCase):
@@ -44,61 +40,51 @@ class CarryForward(unittest.TestCase):
     def tearDown(self):
         self.dir.cleanup()
 
-    def run_cli(self, allowed=()):
-        gaps = Path(self.dir.name) / "allowed.txt"
-        gaps.write_text("# test list\n" + "".join(f"{d} genuine gap\n" for d in allowed))
-        env = dict(os.environ, LAMP_ALLOWED_GAPS=str(gaps))
-        return subprocess.run([sys.executable, str(SCRIPT), str(self.new), str(self.prev)],
-                              capture_output=True, text=True, env=env)
-
-    def test_republished_empty_without_previous_fails(self):
-        make(self.new, {D1: 2, D3: 2}, {D1: 2, D2: 0, D3: 2})
-        out = self.run_cli()
-        self.assertEqual(out.returncode, 1)
-        self.assertIn("::error::No staging rows for 2026-09-09", out.stdout)
-
-    def test_previous_without_the_day_fails(self):
-        make(self.new, {D1: 2, D3: 2}, {D1: 2, D2: 0, D3: 2})
-        make(self.prev, {D1: 2}, {})
-        out = self.run_cli()
-        self.assertEqual(out.returncode, 1)
-        self.assertIn("2026-09-09", out.stdout)
-
-    def test_carry_restores_staging_rows_only(self):
-        make(self.new, {D1: 2, D3: 2}, {D1: 2, D2: 0, D3: 2})
-        make(self.prev, {D1: 5, D2: 3}, {})
-        out = self.run_cli()
-        self.assertEqual(out.returncode, 0, out.stdout)
-        self.assertNotIn("::error::", out.stdout)
+    def counts(self):
         con = duckdb.connect(str(self.new), read_only=True)
-        counts = dict(con.execute("select service_date, count(*) from staging.stg_lamp__subway_trip_stops group by 1").fetchall())
+        out = dict(con.execute("select service_date, count(*) from staging.stg_lamp__subway_trip_stops group by 1").fetchall())
         tables = con.execute("select count(*) from information_schema.tables").fetchone()[0]
         con.close()
-        self.assertEqual(counts, {D1: 2, D2: 3, D3: 2})
-        self.assertEqual(tables, 2)
+        return out, tables
 
-    def test_republished_empty_on_allowed_list_passes(self):
-        make(self.new, {D1: 2, D3: 2}, {D1: 2, D2: 0, D3: 2})
-        out = self.run_cli(allowed=[D2])
-        self.assertEqual(out.returncode, 0, out.stdout)
-        self.assertNotIn("::error::", out.stdout)
-        self.assertIn("::notice::Known upstream LAMP gap (on the allowed-gap list): 2026-09-09", out.stdout)
+    def test_carry_restores_staging_rows_only(self):
+        make(self.new, {D1: 2, D3: 2})
+        make(self.prev, {D1: 5, D2: 3})
+        self.assertEqual(carry_forward(str(self.new), str(self.prev), window_days=3), [D2])
+        self.assertEqual(self.counts(), ({D1: 2, D2: 3, D3: 2}, 1))
 
-    def test_unpublished_day_not_on_list_fails(self):
-        make(self.new, {D1: 2, D3: 2}, {D1: 2, D3: 2})
-        out = self.run_cli()
-        self.assertEqual(out.returncode, 1)
-        self.assertIn("not published by MBTA: 2026-09-09", out.stdout)
+    def test_carry_fills_window_days_before_the_first_loaded_date(self):
+        # The window is calendar dates ending on the newest date, not the loaded range.
+        make(self.new, {D2: 1, D3: 1})
+        make(self.prev, {D0: 4, D1: 2})
+        self.assertEqual(carry_forward(str(self.new), str(self.prev), window_days=3), [D1])
+        self.assertEqual(self.counts()[0], {D1: 2, D2: 1, D3: 1})
 
-    def test_unpublished_day_on_list_passes(self):
-        make(self.new, {D1: 2, D3: 2}, {D1: 2, D3: 2})
-        out = self.run_cli(allowed=[D2])
-        self.assertEqual(out.returncode, 0, out.stdout)
-        self.assertIn("::notice::", out.stdout)
+    def test_previous_without_the_day_carries_nothing(self):
+        make(self.new, {D1: 2, D3: 2})
+        make(self.prev, {D1: 2})
+        self.assertEqual(carry_forward(str(self.new), str(self.prev), window_days=3), [])
+
+    def test_no_previous_warehouse_is_a_no_op(self):
+        make(self.new, {D1: 2, D3: 2})
+        self.assertEqual(carry_forward(str(self.new), str(self.prev), window_days=3), [])
+        self.assertFalse(self.prev.exists())
 
     def test_no_missing_days(self):
-        make(self.new, {D1: 1, D2: 1}, {D1: 1, D2: 1})
-        self.assertEqual(carry_forward(str(self.new), str(self.prev), allowed=set()), ([], [], []))
+        make(self.new, {D1: 1, D2: 1, D3: 1})
+        make(self.prev, {D2: 9})
+        self.assertEqual(carry_forward(str(self.new), str(self.prev), window_days=3), [])
+        self.assertEqual(self.counts()[0], {D1: 1, D2: 1, D3: 1})
+
+    def test_cli_writes_carried_count_and_exits_zero(self):
+        make(self.new, {D1: 2, D3: 2})
+        make(self.prev, {D2: 3})
+        out_file = Path(self.dir.name) / "out.txt"
+        out = subprocess.run([sys.executable, str(SCRIPT), str(self.new), str(self.prev), "--window-days", "3"],
+                             capture_output=True, text=True, env=dict(os.environ, GITHUB_OUTPUT=str(out_file)))
+        self.assertEqual(out.returncode, 0, out.stderr)
+        self.assertIn("carried over: 2026-09-09", out.stdout)
+        self.assertEqual(out_file.read_text(), "carried=1\n")
 
 
 if __name__ == "__main__":

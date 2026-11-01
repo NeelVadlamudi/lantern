@@ -1,64 +1,52 @@
-"""Cold-start carry-over for LAMP days MBTA has since republished empty, and a gap check.
+"""Carry-over of LAMP days a previous warehouse has and the current one lacks.
 
 MBTA republished 2026-07-16 and 2026-09-09 as empty files (2026-10-22). A warm warehouse keeps
 the rows it loaded earlier, but a fresh warehouse (cache key bumped, or cache evicted) cannot
-read them again, so the site would lose a day it showed before. This copies, from the previous
-warehouse, the staging rows for every date inside the new warehouse's loaded range that the new
-one has no rows for. Only staging.stg_lamp__subway_trip_stops is written (never fact or mart
-rows); _loaded_at is set to now, so the next incremental dbt build moves those dates into
-fct_trip_stop_events and recomputes everything downstream with the current models.
+read them again, so the site would lose a day it showed before. For every date in the reporting
+window (reporting_window_days consecutive dates ending on the newest staging date) that has no
+staging rows, this copies the previous warehouse's staging rows when it has them. Only
+staging.stg_lamp__subway_trip_stops is written (never fact or mart rows); _loaded_at is set to
+now, so the next incremental dbt build moves those dates into fct_trip_stop_events and
+recomputes everything downstream with the current models.
 
-After the attempt, every date in the loaded range that still has no staging rows fails the run
-(::error:: naming the dates, exit 1) unless it is on the explicit allowed-gap list: genuine
-upstream gaps, days MBTA never published, each recorded with a reason. Allowed gaps are printed
-as ::notice::. The error says whether MBTA lists the file (republished empty) or not, from
-staging.lamp_file_reads, so a new genuine gap can be checked and added to the list on purpose.
+It does not judge gaps: scripts/check_lamp_window.py runs after every build and fails the run
+for missing days that are not on the allowed-gap list.
 
-Allowed-gap list: scripts/lamp_allowed_gaps.txt by default, or the path in LAMP_ALLOWED_GAPS.
-One date per line (YYYY-MM-DD), then the reason; # starts a comment.
-
-Usage: python3 scripts/carry_forward_lamp_days.py NEW.duckdb PREVIOUS.duckdb
+Prints the carried dates; with GITHUB_OUTPUT set, also writes carried=<count>.
+Usage: python3 scripts/carry_forward_lamp_days.py NEW.duckdb PREVIOUS.duckdb [--window-days N]
 """
+import argparse
 import datetime
 import os
-import sys
 
 import duckdb
 
+from check_lamp_window import window_days_from_project
+
 TABLE = "staging.stg_lamp__subway_trip_stops"
-READS = "staging.lamp_file_reads"
-DEFAULT_ALLOWED = os.path.join(os.path.dirname(os.path.abspath(__file__)), "lamp_allowed_gaps.txt")
 
 
-def load_allowed(path=None):
-    path = path or os.environ.get("LAMP_ALLOWED_GAPS") or DEFAULT_ALLOWED
-    allowed = set()
-    if os.path.exists(path):
-        for line in open(path):
-            line = line.split("#", 1)[0].strip()
-            if line:
-                allowed.add(datetime.date.fromisoformat(line.split()[0]))
-    return allowed
+def missing_in_window(con, window_days):
+    last = con.execute(f"select max(service_date) from {TABLE}").fetchone()[0]
+    if last is None:
+        return []
+    first = last - datetime.timedelta(days=window_days - 1)
+    have = {r[0] for r in con.execute(
+        f"select distinct service_date from {TABLE} where service_date >= ?", [first]).fetchall()}
+    return [first + datetime.timedelta(days=i) for i in range(window_days)
+            if first + datetime.timedelta(days=i) not in have]
 
 
-def _missing(con):
-    return [r[0] for r in con.execute(f"""
-        select d::date from range(
-            (select min(service_date) from {TABLE}),
-            (select max(service_date) from {TABLE}) + 1,
-            interval 1 day) as t(d)
-        where d::date not in (select distinct service_date from {TABLE})
-        order by 1""").fetchall()]
-
-
-def carry_forward(new_path, prev_path, allowed=None):
-    """Returns (carried, upstream_gaps, lost) as lists of dates."""
-    con = duckdb.connect(new_path)
-    missing = _missing(con)
-    carried = []
+def carry_forward(new_path, prev_path, window_days=None):
+    """Returns the list of dates copied from the previous warehouse."""
+    window_days = window_days or window_days_from_project()
     if not os.path.exists(prev_path):
-        print(f"no previous warehouse at {prev_path}; nothing can be carried over")
-    elif missing:
+        print(f"no previous warehouse at {prev_path}; nothing to carry over")
+        return []
+    con = duckdb.connect(new_path)
+    missing = missing_in_window(con, window_days)
+    carried = []
+    if missing:
         con.execute(f"attach '{prev_path}' as prev (read_only)")
         cols = [r[0] for r in con.execute(
             "select column_name from information_schema.columns where table_catalog = current_database()"
@@ -75,32 +63,19 @@ def carry_forward(new_path, prev_path, allowed=None):
                 insert into {TABLE} ({", ".join(f'"{c}"' for c in cols)})
                 select {select_cols} from prev.{TABLE} as p
                 where p.service_date in (select unnest(?::date[]))""", [carried])
-    print("carried over:", ", ".join(map(str, carried)) or "none")
-    still = _missing(con)
-    listed = set()
-    if still:
-        listed = {r[0] for r in con.execute(
-            f"select distinct service_date from {READS} where service_date in (select unnest(?::date[]))",
-            [still]).fetchall()}
     con.close()
-    allowed = load_allowed() if allowed is None else set(allowed)
-    gaps = [d for d in still if d in allowed]
-    lost = [d for d in still if d not in allowed]
-    if gaps:
-        print("::notice::Known upstream LAMP gap (on the allowed-gap list): " + ", ".join(map(str, gaps)))
-    if lost:
-        empty = [str(d) for d in lost if d in listed]
-        unlisted = [str(d) for d in lost if d not in listed]
-        why = []
-        if empty:
-            why.append("republished empty (MBTA lists the file, 0 rows): " + ", ".join(empty))
-        if unlisted:
-            why.append("not published by MBTA: " + ", ".join(unlisted))
-        print("::error::No staging rows for " + ", ".join(map(str, lost)) + " and no earlier rows could be "
-              "carried over; " + "; ".join(why) + ". Add a date to scripts/lamp_allowed_gaps.txt only "
-              "if it is a genuine upstream gap.")
-    return carried, gaps, lost
+    print("window dates without staging rows:", ", ".join(map(str, missing)) or "none")
+    print("carried over:", ", ".join(map(str, carried)) or "none")
+    return carried
 
 
 if __name__ == "__main__":
-    sys.exit(1 if carry_forward(sys.argv[1], sys.argv[2])[2] else 0)
+    p = argparse.ArgumentParser()
+    p.add_argument("new")
+    p.add_argument("prev")
+    p.add_argument("--window-days", type=int)
+    a = p.parse_args()
+    carried = carry_forward(a.new, a.prev, a.window_days)
+    if os.environ.get("GITHUB_OUTPUT"):
+        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+            f.write(f"carried={len(carried)}\n")

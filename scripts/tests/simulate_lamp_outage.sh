@@ -66,12 +66,12 @@ dbt build --profiles-dir . --full-refresh --vars "$(vars "lamp_start_date: $d1")
 # Cold-start gap check: a day MBTA never published is an allowed gap (notice), not a failure.
 # Without $d2 on the allowed-gap list the check must fail; with it, it must pass with a notice.
 echo "# sim" > "$sim/allowed.txt"
-if LAMP_ALLOWED_GAPS="$sim/allowed.txt" python3 scripts/carry_forward_lamp_days.py "$MBTA_DUCKDB_PATH" warehouse/sim_no_previous.duckdb; then
+if LAMP_ALLOWED_GAPS="$sim/allowed.txt" python3 scripts/check_lamp_window.py "$MBTA_DUCKDB_PATH" --window-days 3; then
   echo "missing $d2 not on the allowed list should fail"; exit 1; fi
 echo "$d2 simulated upstream gap" >> "$sim/allowed.txt"
-carry=$(LAMP_ALLOWED_GAPS="$sim/allowed.txt" python3 scripts/carry_forward_lamp_days.py "$MBTA_DUCKDB_PATH" warehouse/sim_no_previous.duckdb)
-echo "$carry"
-echo "$carry" | grep -q "::notice::Known upstream LAMP gap (on the allowed-gap list): $d2" || exit 1
+gapcheck=$(LAMP_ALLOWED_GAPS="$sim/allowed.txt" python3 scripts/check_lamp_window.py "$MBTA_DUCKDB_PATH" --window-days 3)
+echo "$gapcheck"
+echo "$gapcheck" | grep -q "::notice::Known upstream LAMP gap (on the allowed-gap list): $d2" || exit 1
 
 echo "== B. $d2 published late"
 mv "$sim/$(f $d2)" "$bucket/"
