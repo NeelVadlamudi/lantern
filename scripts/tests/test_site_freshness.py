@@ -13,7 +13,7 @@ def board(ts):
     return {"build": {"generated_at_utc": ts}}
 
 
-class SiteFreshness(unittest.TestCase):
+class SiteFreshnessTest(unittest.TestCase):
     def test_fresh_build_passes(self):
         self.assertTrue(check(board("2026-11-01T12:00:00.000000Z"), NOW)[0])
 
