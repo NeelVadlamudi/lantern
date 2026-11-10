@@ -41,7 +41,7 @@ Notes:
 - LAMP republishes recent service dates. The LAMP staging table re-reads the files for the last
   4 loaded dates (latest minus `incremental_lookback_days`) and replaces those dates on every
   run, and the incremental fact reprocesses the same dates.
-- Gated entries currently run through 2026-08-31, so rider weights come from July and August.
+- Gated entries come from the MBTA's Gated Station Entries release, which the MBTA says is updated on a one- to two-month delay. As of November 9, 2026, the latest published month ends on 2026-09-30, and the board has all of it. Rider weights use the latest 56 days of gate entries (currently August 6 to September 30, 2026); the exact window is listed in `board_data.json`.
 - Monthly ridership is staged and tested but not used by any mart yet.
 
 ## Not used

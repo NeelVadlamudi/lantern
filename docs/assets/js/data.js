@@ -1,5 +1,5 @@
 // dbt output loader. Reads board_data.json and, when mart Parquet files exist, runs SQL on them
-// in the browser with DuckDB-WASM. Never fabricates values: missing files mean empty states.
+// in the browser with DuckDB-WASM. Missing files show empty states, not placeholder values.
 import { CONFIG } from "./config.js";
 import { TABLES, PARQUET_FILES, BOARD_KEYS, SQL, MAP_FALLBACK_FILES, LAZY_FILES } from "./queries.js";
 
