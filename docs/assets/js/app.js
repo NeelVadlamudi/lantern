@@ -1211,11 +1211,25 @@ function renderDataThrough() {
   const through = sourceThrough("subway") || getPath(board, "latest_day.service_date") || getPath(board, "meta.service_date");
   let w = $("#data-warn");
   if (!w) { w = document.createElement("p"); w.id = "data-warn"; w.className = "data-warn"; w.setAttribute("role", "status"); $("#statement").prepend(w); }
-  // Per-line low completeness on the latest day (latest_day.scopes[].is_low_completeness; rule in latest_day.completeness_rule).
+  // Lines with low completeness on the latest day. The banner states the rule in plain words; the full rule is in latest_day.completeness_rule.
   const ld = getPath(board, "latest_day.service_date");
-  const low = (getPath(board, "latest_day.scopes") || []).filter((s) => s && s.is_low_completeness === true && s.scope_id !== "system");
+  const lowAll = (getPath(board, "latest_day.scopes") || []).filter((s) => s && s.is_low_completeness === true && s.scope_id !== "system");
+  // Name the branches, not the parent line too, when branches are already listed.
+  const low = lowAll.filter((s) => !lowAll.some((b) => b.scope_id.startsWith(`${s.scope_id}-`)));
   w.hidden = !low.length;
-  w.textContent = low.length && ld ? `Incomplete data on ${ui.fmt.day(ld)} for ${low.map((s) => `${s.scope_name || s.scope_id} (${Math.round(s.completeness_share * 100)}% of scheduled trips compared)`).join(", ")}: figures for ${low.length === 1 ? "that line" : "those lines"} may be missing runs. ${getPath(board, "latest_day.completeness_rule") || ""}` : "";
+  const names = (xs) => xs.map((s) => s.scope_name || s.scope_id).join(", ");
+  const planned = low.filter((s) => s.is_planned_change === true);
+  const missing = low.filter((s) => s.is_planned_change !== true);
+  const minPct = Math.round((getPath(board, "meta.thresholds.completeness_min_share") ?? 0.8) * 100);
+  const parts = [];
+  // A planned closure or diversion runs on its own timetable, so few runs line up with the regular schedule. That is expected, not lost data.
+  const unmeasured = planned.filter((s) => s.completeness_share === 0);
+  const partial = planned.filter((s) => s.completeness_share !== 0);
+  if (unmeasured.length) parts.push(`${names(unmeasured)} ran a planned closure or diversion. Those trains weren't on the published schedule, so lateness can't be measured for ${unmeasured.length === 1 ? "that line" : "those lines"} that day.`);
+  if (partial.length) parts.push(`${names(partial)} ran a planned diversion, so some runs don't line up with the regular schedule.`);
+  if (planned.length) parts.push("Planned-change days are left out of typical values and headline figures.");
+  if (missing.length) parts.push(`${missing.map((s) => `${s.scope_name || s.scope_id} (${Math.round(s.completeness_share * 100)}% of scheduled trips compared)`).join(", ")}: figures for ${missing.length === 1 ? "that line" : "those lines"} may be missing runs. A line is flagged when fewer than ${minPct}% of its scheduled trips have a matching run in the data.`);
+  w.textContent = low.length && ld ? `Data on ${ui.fmt.day(ld)}: ${parts.join(" ")}` : "";
   if (el && through) el.dataset.through = through;
 }
 
