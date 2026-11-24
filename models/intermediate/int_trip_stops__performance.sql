@@ -126,5 +126,10 @@ select
     ) as is_bunched,
     compared._loaded_at
 from compared
+-- The join minute is wrapped into the clock day twice: a few LAMP events are stamped just
+-- before the service date starts (2026-11-12 has 56, at 23:49-23:55 the evening before), so
+-- their minute is negative, and DuckDB's % keeps the sign. Wrapped, 23:49 the evening before
+-- lands on minute 1429, the late-evening period it belongs to.
 left join periods
-    on cast(floor(compared.event_service_seconds / 60) as integer) % 1440 = periods.minute_of_day
+    on ((cast(floor(compared.event_service_seconds / 60) as integer) % 1440) + 1440) % 1440
+        = periods.minute_of_day
