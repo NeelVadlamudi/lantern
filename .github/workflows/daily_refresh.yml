@@ -44,12 +44,14 @@ jobs:
     outputs:
       site_ready: ${{ steps.site.outputs.ready }}
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
 
       - name: Leak scan (tracked files)
         run: bash scripts/leak_scan.sh
 
-      - uses: actions/setup-python@v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
         with:
           python-version: "3.12"
           cache: pip
@@ -59,7 +61,7 @@ jobs:
 
       - name: Restore warehouse
         id: warehouse
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: warehouse/mbta.duckdb
           key: mbta-duckdb-v4-${{ github.run_id }}
@@ -70,7 +72,7 @@ jobs:
       - name: Restore previous warehouse for carry-over
         id: prev_warehouse
         if: steps.warehouse.outputs.cache-matched-key == ''
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: warehouse/mbta.duckdb
           key: mbta-duckdb-prev-${{ github.run_id }}
@@ -79,6 +81,17 @@ jobs:
       - name: Set previous warehouse aside
         if: steps.prev_warehouse.outputs.cache-matched-key != ''
         run: mv warehouse/mbta.duckdb warehouse/prev.duckdb
+
+      # The staging rows of days MBTA published empty, saved by earlier good runs in their own
+      # small cache (scripts/seed_lamp_empty_days.py). Restored on every run; the carry-over
+      # step below puts them back when this run's warehouse has none, so a cold start no
+      # longer loses such a day when no previous warehouse survives either.
+      - name: Restore saved empty-day rows
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: warehouse/lamp_empty_days.parquet
+          key: lantern-lamp-empty-days-${{ github.run_id }}
+          restore-keys: lantern-lamp-empty-days-
 
       # Decided here, before any step can create warehouse/mbta.duckdb: the warehouse is new
       # unless the v4 cache restored one.
@@ -138,18 +151,26 @@ jobs:
           done
           dbt run --profiles-dir . -s int_gtfs_stations_as_of
 
-      # Whenever a previous warehouse was set aside: copy its staging rows for reporting-window
-      # days the new warehouse has none for (empty republished files), then rebuild
-      # incrementally so they reach the fact and the site. Without this a cold start drops
-      # 2026-09-09. Judging gaps is left to the window check below.
+      # Whenever a previous warehouse was set aside, or saved empty-day rows were restored:
+      # copy the staging rows for reporting-window days the new warehouse has none for (empty
+      # republished files), then rebuild incrementally so they reach the fact and the site.
+      # Without this a cold start drops 2026-09-09. Judging gaps is left to the window check
+      # below.
       - name: Carry over days MBTA republished empty
         id: carry
-        if: steps.build.outcome == 'success' && hashFiles('warehouse/prev.duckdb') != ''
+        if: steps.build.outcome == 'success' && (hashFiles('warehouse/prev.duckdb') != '' || hashFiles('warehouse/lamp_empty_days.parquet') != '')
         continue-on-error: true
         run: |
-          python3 scripts/carry_forward_lamp_days.py warehouse/mbta.duckdb warehouse/prev.duckdb
-          rm -f warehouse/prev.duckdb
-          if [ "$(sed -n 's/^carried=//p' "$GITHUB_OUTPUT")" != "0" ]; then
+          if [ -f warehouse/prev.duckdb ]; then
+            python3 scripts/carry_forward_lamp_days.py warehouse/mbta.duckdb warehouse/prev.duckdb
+            rm -f warehouse/prev.duckdb
+          fi
+          if [ -f warehouse/lamp_empty_days.parquet ]; then
+            python3 scripts/seed_lamp_empty_days.py apply warehouse/mbta.duckdb warehouse/lamp_empty_days.parquet
+          fi
+          carried=$(sed -n 's/^carried=//p' "$GITHUB_OUTPUT" | tail -1)
+          seeded=$(sed -n 's/^seed_carried=//p' "$GITHUB_OUTPUT" | tail -1)
+          if [ "${carried:-0}" != "0" ] || [ "${seeded:-0}" != "0" ]; then
             dbt build --profiles-dir . --vars "$(scripts/mirror_open_data.sh warehouse/mirror)"
           fi
 
@@ -161,9 +182,13 @@ jobs:
           dbt test --profiles-dir . --select tag:post_build --vars '{check_build: true}'
 
       # Every run, warm or cold, after the carry-over and its rebuild: each of the last
-      # reporting_window_days calendar dates must have trips in fct_trips, unless it is on
-      # scripts/lamp_allowed_gaps.txt. A missing day fails the job (no continue-on-error), so
-      # nothing is published or saved; a failed or skipped build fails here too.
+      # reporting_window_days calendar dates must have trips in fct_trips. The check judges
+      # missing days in tiers (scripts/check_lamp_window.py): allowed-gap list, then the
+      # index summary from the LAMP file list step (a date MBTA never published and is past
+      # the grace window warns instead of failing), then failure. A missing day that fails
+      # fails the job (no continue-on-error), so nothing is published or saved; a failed or
+      # skipped build fails here too. The two newest-date lines go to the run summary, so a
+      # stuck board can be told apart from a stuck feed at a glance.
       - name: Check the reporting window has no missing days
         id: gaps
         if: always()
@@ -172,7 +197,13 @@ jobs:
             echo "::error::dbt build did not succeed (${{ steps.build.outcome }}); the reporting window was not checked"
             exit 1
           fi
-          python3 scripts/check_lamp_window.py warehouse/mbta.duckdb
+          set +e
+          python3 scripts/check_lamp_window.py warehouse/mbta.duckdb --gaps-json warehouse/lamp_gaps.json | tee window_check.txt
+          code=${PIPESTATUS[0]}
+          if [ -n "${GITHUB_STEP_SUMMARY:-}" ]; then
+            grep -E "^newest service date" window_check.txt >> "$GITHUB_STEP_SUMMARY" || true
+          fi
+          exit $code
 
       - name: Decide what to publish
         id: outcome
@@ -192,10 +223,28 @@ jobs:
       # caches are saved, and Pages is deployed, from refs/heads/main alone.
       - name: Save warehouse
         if: steps.outcome.outputs.good == 'true' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: warehouse/mbta.duckdb
           key: mbta-duckdb-v4-${{ github.run_id }}
+
+      # Keep the empty-day rows saved outside the warehouse cache too: export what this run's
+      # warehouse holds for the days MBTA published empty, into the small cache restored near
+      # the top of this job. Without a second copy, one lost warehouse cache loses those days
+      # for good, because MBTA no longer serves their files with rows in them.
+      - name: Save empty-day rows
+        if: steps.outcome.outputs.good == 'true'
+        run: |
+          if [ -f warehouse/lamp_gaps.json ]; then
+            python3 scripts/seed_lamp_empty_days.py export warehouse/mbta.duckdb warehouse/lamp_gaps.json warehouse/lamp_empty_days.parquet
+          fi
+
+      - name: Save empty-day rows to cache
+        if: steps.outcome.outputs.good == 'true' && github.ref == 'refs/heads/main' && hashFiles('warehouse/lamp_empty_days.parquet') != ''
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
+        with:
+          path: warehouse/lamp_empty_days.parquet
+          key: lantern-lamp-empty-days-${{ github.run_id }}
 
       - name: Docs
         if: steps.outcome.outputs.good == 'true'
@@ -225,13 +274,13 @@ jobs:
       - name: Restore last good site
         id: last_good
         if: steps.outcome.outputs.good != 'true'
-        uses: actions/cache/restore@v6
+        uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: _site
           key: lantern-site-${{ github.run_id }}
           restore-keys: lantern-site-
 
-      - uses: actions/configure-pages@v6
+      - uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6
         id: pages
 
       # Run log: this run's line (written by the on-run-end hook, pass or fail) is added to the
@@ -262,7 +311,7 @@ jobs:
 
       - name: Save site as last good
         if: steps.outcome.outputs.good == 'true' && steps.site_scan.outcome == 'success' && github.ref == 'refs/heads/main'
-        uses: actions/cache/save@v6
+        uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6
         with:
           path: _site
           key: lantern-site-${{ github.run_id }}
@@ -272,7 +321,7 @@ jobs:
         if: steps.site_scan.outcome == 'success'
         run: echo "ready=true" >> "$GITHUB_OUTPUT"
 
-      - uses: actions/upload-pages-artifact@v5
+      - uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5
         if: steps.site.outputs.ready == 'true' && github.ref == 'refs/heads/main'
         with:
           path: _site
@@ -289,6 +338,7 @@ jobs:
     needs: build
     if: ${{ !cancelled() && needs.build.outputs.site_ready == 'true' && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     permissions:
       pages: write
       id-token: write
@@ -297,7 +347,7 @@ jobs:
       url: ${{ steps.deployment.outputs.page_url }}
     steps:
       - id: deployment
-        uses: actions/deploy-pages@v5
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5
 
   # Runs after every deploy attempt, including days the last good build was kept.
   # Fails if the live site's data is more than 26 hours old, so stale data cannot look green.
@@ -305,7 +355,10 @@ jobs:
     needs: deploy
     if: ${{ !cancelled() && github.ref == 'refs/heads/main' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
       - name: Check live site data age
         run: python3 scripts/site_freshness.py "https://neelvadlamudi.github.io/lantern/data/board_data.json"
