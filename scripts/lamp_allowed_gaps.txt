@@ -1,4 +1,9 @@
-# Genuine upstream LAMP gaps: service dates MBTA never published, so a missing day here does
+# Upstream LAMP gaps: service dates whose trips cannot be loaded, so a missing day here does
 # not fail the daily refresh (scripts/check_lamp_window.py prints a ::notice:: instead).
-# One date per line, YYYY-MM-DD, then the reason. Add a date only after checking MBTA's index.
-# No genuine gaps in the current loaded range (Jul 15 - Oct 31, 2026).
+# One date per line, YYYY-MM-DD, then the reason. Add a date only after checking MBTA's index,
+# and record what the index shows; carry-over and the saved empty-day rows are tried first.
+2026-09-09  Published in full, then republished empty on 2026-10-22 (MBTA's index lists the
+#           file at 3,286 bytes, last modified 2026-10-22, against 0.7 MB and up for a real
+#           day). The full file is no longer served, and no warehouse saved since still holds
+#           its staging rows, so the day cannot be rebuilt. When a previous warehouse does
+#           hold the rows, carry-over restores them and this line is not what saves the run.

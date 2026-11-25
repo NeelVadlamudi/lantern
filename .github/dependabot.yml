@@ -1,0 +1,10 @@
+# Dependabot watches the GitHub Actions used by the workflows. The actions are pinned to
+# commit SHAs; Dependabot opens the pull requests that move a pin, so an update is reviewed
+# like any other change instead of arriving silently with a moved tag.
+version: 2
+updates:
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"

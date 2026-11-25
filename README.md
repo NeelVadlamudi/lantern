@@ -4,6 +4,8 @@ Shows which hours run late most often, and which stations cost riders the most t
 
 [Live board](https://neelvadlamudi.github.io/lantern/) · [dbt documentation](https://neelvadlamudi.github.io/lantern/dbt/) · [Portfolio](https://neelvadlamudi.github.io/neelresume/)
 
+[![OpenSSF Scorecard](https://api.securityscorecards.dev/projects/github.com/NeelVadlamudi/lantern/badge)](https://securityscorecards.dev/viewer/?uri=github.com/NeelVadlamudi/lantern)
+
 ## What the board shows
 
 **11.8% of compared train runs took more than five minutes over scheduled run time** across all days in the **August 11–November 8, 2026** window. The weekday share was **12.6%**. These are the values published in [`data/board_data.json`](https://neelvadlamudi.github.io/lantern/data/board_data.json), checked November 9, 2026, under the `late_trip_share` tile. The board refreshes daily; these are a dated reading, not permanent project results.
@@ -16,7 +18,7 @@ The board helps a reader move from the system figure to a line, station, time of
 
 Public MBTA files → DuckDB staging → dbt facts and marts → Parquet and JSON → GitHub Pages.
 
-DuckDB reads LAMP performance files, archived GTFS schedules and MBTA Open Data. dbt defines the grains, transformations, contracts and reconciliation checks. The browser reads the published JSON first and queries Parquet with DuckDB-WASM for detail. MapLibre displays the network; current train positions come separately from the MBTA V3 API.
+DuckDB reads LAMP performance files, archived GTFS schedules and MBTA Open Data. dbt defines the grains, transformations, contracts and reconciliation checks — 119 models in all, from staging through the marts to the board exports. The browser reads the published JSON first and queries Parquet with DuckDB-WASM for detail. MapLibre displays the network; current train positions come separately from the MBTA V3 API.
 
 The main fact table, `fct_trip_stop_events`, records a train at a stop on a service date. `fct_trips` rolls those observations up to train runs. `int_train_runs` and the segment marts provide the track-level view. Model and column definitions are in the [dbt documentation](https://neelvadlamudi.github.io/lantern/dbt/); naming and modeling rules are in [CONVENTIONS.md](CONVENTIONS.md).
 
@@ -34,7 +36,9 @@ A long gap is a departure interval greater than **1.5 times** the scheduled gap.
 
 The sample CI workflow runs SQL linting, a full sample build, an incremental build and post-build checks. Tests recompute headline measures from the facts, reconcile totals across grains, check model contracts and verify exports. See [tests/](tests/) and [the CI workflow](.github/workflows/dbt_ci.yml).
 
-The [daily workflow](.github/workflows/daily_refresh.yml) caches the warehouse between builds, checks source freshness, builds and tests the data, generates dbt docs, and publishes a Pages artifact. On a failed build it can retain the last good site and record the failure in the public health log. A working page alone is not proof that a refresh succeeded.
+The [daily workflow](.github/workflows/daily_refresh.yml) caches the warehouse between builds, checks source freshness, builds and tests the data, generates dbt docs, and publishes a Pages artifact. On a failed build it can retain the last good site and record the failure in the public health log. A working page alone is not proof that a refresh succeeded. Every action the workflows use is pinned to a commit SHA, Dependabot proposes the updates, and OpenSSF Scorecard runs weekly (see [SECURITY.md](SECURITY.md)).
+
+**What broke in November 2026.** From November 13 to 23 the refresh failed eleven runs in a row, and the board kept serving the November 12 build. Two traps in the upstream data did it. The November 12 LAMP file stamps 56 events a few minutes *before* that service date starts (23:49–23:55 on November 11); those events matched no service period, a not-null test failed, and the build stopped — every day, because recent files are re-read on each run. And 2026-09-09, which MBTA republished as an empty file that October, cannot be loaded by a fresh warehouse at all, so the reporting-window check would have gone on failing even with the first trap fixed. The handling now: an event stamped just before its service date is given the service period its clock time belongs to; the window check judges a missing day against MBTA's own index, so a day MBTA never published and is past a three-day grace window warns instead of freezing the board, while a day MBTA did publish still fails the run; the staging rows of published-empty days are saved on every good run and put back after a cold start; and 2026-09-09 sits on the allowed-gap list with the index evidence recorded next to it, because its full file is no longer served and its rows can no longer be rebuilt.
 
 The configured schedule is **6:30 AM EST / 7:30 AM EDT (America/New_York)**. That is a requested start, not a delivery guarantee; check the actual run and published build timestamp. The current post-deploy check tests the age of the live payload. It does not yet prove that the payload is the one produced by that particular run.
 

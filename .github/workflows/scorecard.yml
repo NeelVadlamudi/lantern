@@ -1,0 +1,42 @@
+name: "Lantern: OpenSSF Scorecard"
+
+# Weekly supply-chain check (pinned actions, token permissions, branch protection and the
+# like), published to the Security tab and to the OpenSSF API, which is what the README badge
+# reads. Runs on a schedule and on pushes to main; it never changes code.
+
+on:
+  schedule:
+    - cron: "30 12 * * 1"  # Mondays, after the morning refresh
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: read-all
+
+concurrency:
+  group: scorecard-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  analysis:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      security-events: write
+      id-token: write
+      contents: read
+      actions: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+
+      - uses: ossf/scorecard-action@4eaacf0543bb3f2c246792bd56e8cdeffafb205a # v2.4.3
+        with:
+          results_file: results.sarif
+          results_format: sarif
+          publish_results: true
+
+      - uses: github/codeql-action/upload-sarif@915412ff23e8b7659517e607487dbeae018f2934 # v4
+        with:
+          sarif_file: results.sarif

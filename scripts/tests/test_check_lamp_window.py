@@ -2,6 +2,7 @@
 
 Run: python -m unittest discover -s scripts/tests
 """
+import json
 import os
 import subprocess
 import sys
@@ -36,10 +37,15 @@ class WindowGapCheck(unittest.TestCase):
     def tearDown(self):
         self.dir.cleanup()
 
-    def run_check(self, allowed=(), *extra):
+    def run_check(self, allowed=(), *extra, gaps=None):
         lst = Path(self.dir.name) / "allowed.txt"
         lst.write_text("# test list\n" + "".join(f"{d} genuine gap\n" for d in allowed))
-        return subprocess.run([sys.executable, str(SCRIPT), str(self.db), *extra], capture_output=True, text=True,
+        args = [sys.executable, str(SCRIPT), str(self.db), *extra]
+        if gaps is not None:
+            gpath = Path(self.dir.name) / "gaps.json"
+            gpath.write_text(json.dumps(gaps))
+            args += ["--gaps-json", str(gpath)]
+        return subprocess.run(args, capture_output=True, text=True,
                               env=dict(os.environ, LAMP_ALLOWED_GAPS=str(lst)))
 
     def without_sep9(self):
@@ -102,6 +108,45 @@ class WindowGapCheck(unittest.TestCase):
         out = self.run_check((), "--window-days", "3")
         self.assertEqual(out.returncode, 1)
         self.assertIn("2026-10-30 (no staging rows)", out.stdout)
+
+    def gaps(self, not_published=(), published_empty=()):
+        return {"list_source": "index.csv", "latest_published": str(LAST),
+                "not_published": [str(d) for d in not_published],
+                "published_empty": [str(d) for d in published_empty]}
+
+    def without(self, *days):
+        return [d for d in self.window if d not in days]
+
+    def test_never_published_old_date_warns_and_passes(self):
+        old = date(2026, 10, 20)  # 11 days before the window's end: past the grace window
+        make(self.db, self.without(old), self.without(old))
+        out = self.run_check(gaps=self.gaps(not_published=[old]))
+        self.assertEqual(out.returncode, 0, out.stdout)
+        self.assertNotIn("::error::", out.stdout)
+        self.assertIn("::warning::", out.stdout)
+        self.assertIn("2026-10-20", out.stdout)
+        self.assertIn("newest service date MBTA has published: 2026-10-31", out.stdout)
+
+    def test_never_published_recent_date_still_fails(self):
+        recent = date(2026, 10, 30)  # one day before the window's end: may still be on its way
+        make(self.db, self.without(recent), self.without(recent))
+        out = self.run_check(gaps=self.gaps(not_published=[recent]))
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn("::error::Missing service dates in the 90-day window: 2026-10-30 (no staging rows)", out.stdout)
+
+    def test_published_empty_date_still_fails_loud(self):
+        # MBTA did publish the day (an empty file): losing its rows is our problem, not a gap
+        # the index summary can excuse. Only the allowed-gap list can excuse it.
+        make(self.db, self.without_sep9(), self.without_sep9())
+        out = self.run_check(gaps=self.gaps(published_empty=[SEP9]))
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn("2026-09-09 (no staging rows)", out.stdout)
+
+    def test_published_date_missing_with_gaps_file_still_fails(self):
+        make(self.db, self.without_sep9(), self.without_sep9())
+        out = self.run_check(gaps=self.gaps())
+        self.assertEqual(out.returncode, 1, out.stdout)
+        self.assertIn("2026-09-09 (no staging rows)", out.stdout)
 
 
 if __name__ == "__main__":
